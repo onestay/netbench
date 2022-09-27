@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::net::TcpStream;
-
+use std::io;
 #[derive(Debug)]
 pub enum MessageType {
     NewTest,
@@ -66,7 +66,7 @@ pub enum NBError {
     InvalidMessageType(u16),
 }
 
-async fn read_n(socket: &mut TcpStream, result: &mut Vec<u8>, n: usize) -> Result<()> {
+async fn read_n(socket: &TcpStream, result: &mut Vec<u8>, n: usize) -> Result<()> {
     const BUF_SIZE: usize = 1024;
     let mut buf: [u8; BUF_SIZE] = [0; BUF_SIZE];
     let mut to_be_read = n;
@@ -79,12 +79,34 @@ async fn read_n(socket: &mut TcpStream, result: &mut Vec<u8>, n: usize) -> Resul
 
         socket.readable().await?;
 
-        match socket.try_read(&mut buf[..read_buf_size])? {
-            0 => return Err(NBError::ConnectionReset.into()),
-            val => {
+        match socket.try_read(&mut buf[..read_buf_size]) {
+            Ok(0) => return Err(NBError::ConnectionReset.into()),
+            Ok(val) => {
                 to_be_read -= val;
                 result.extend_from_slice(&buf[0..val]);
-            }
+            },
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(e) => return Err(e.into())
+        }
+    }
+
+    Ok(())
+}
+
+async fn write_n(socket: &TcpStream, mut data: &mut [u8], n: usize) -> Result<()> {
+    let mut to_be_written = n;
+
+    while to_be_written != 0 {
+        socket.writable().await?;
+
+        match socket.try_write(data) {
+            Ok(0) => return Err(NBError::ConnectionReset.into()),
+            Ok(val) => {
+                to_be_written -= val;
+                data = &mut data[to_be_written..];
+            },
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(e) => return Err(e.into())
         }
     }
 
