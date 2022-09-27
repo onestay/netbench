@@ -4,7 +4,6 @@ use anyhow::Result;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use crate::NBError;
 use crate::{MessageType, NewTestMessage};
 
 // package format:
@@ -29,7 +28,7 @@ impl ConnectedClient {
         match msg_type {
             MessageType::NewTest => {
                 let mut buf: Vec<u8> = Vec::with_capacity(len as usize);
-                crate::read_n(&mut socket, &mut buf, len as usize).await.unwrap();
+                crate::read_n(&socket, &mut buf, len as usize).await.unwrap();
                 let message: NewTestMessage = serde_json::from_slice(buf.as_slice()).unwrap();
                 println!("{:?}", message);
             }
