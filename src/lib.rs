@@ -60,8 +60,8 @@ pub struct NewTestMessage {
 
 #[derive(Debug, Error)]
 pub enum NBError {
-    #[error("Connection reset")]
-    ConnectionReset,
+    #[error("The connection has been closed")]
+    ConnectionClosed,
     #[error("Invalid message type {0}")]
     InvalidMessageType(u16),
 }
@@ -80,7 +80,7 @@ async fn read_n(socket: &TcpStream, result: &mut Vec<u8>, n: usize) -> Result<()
         socket.readable().await?;
 
         match socket.try_read(&mut buf[..read_buf_size]) {
-            Ok(0) => return Err(NBError::ConnectionReset.into()),
+            Ok(0) => return Err(NBError::ConnectionClosed.into()),
             Ok(val) => {
                 to_be_read -= val;
                 result.extend_from_slice(&buf[0..val]);
@@ -100,7 +100,7 @@ async fn write_n(socket: &TcpStream, mut data: &mut [u8], n: usize) -> Result<()
         socket.writable().await?;
 
         match socket.try_write(data) {
-            Ok(0) => return Err(NBError::ConnectionReset.into()),
+            Ok(0) => return Err(NBError::ConnectionClosed.into()),
             Ok(val) => {
                 to_be_written -= val;
                 data = &mut data[to_be_written..];
@@ -125,5 +125,29 @@ mod test {
             bw: 0,
         };
         println!("{}", serde_json::to_string(&message).unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_read_n_write_n() {
+        use tokio::net::{TcpListener, TcpStream};
+        let mut data = String::from("Hello World, how are you?").into_bytes();
+        let data_clone = data.clone();
+        let n = data.len();
+
+        // client thread
+        let server = TcpListener::bind("127.0.0.1:3572").await.unwrap();
+        let client_handle = tokio::spawn(async move {
+            let client = TcpStream::connect("127.0.0.1:3572").await.unwrap();
+            crate::write_n(&client, &mut data, n).await.unwrap();
+        });
+
+        let server_handle = tokio::spawn(async move {
+            let (sock, _) = server.accept().await.unwrap();
+            let mut result = Vec::new();
+            crate::read_n(&sock, &mut result, n).await.unwrap();
+            assert_eq!(result, data_clone);
+        });
+        client_handle.await.unwrap();
+        server_handle.await.unwrap();
     }
 }
