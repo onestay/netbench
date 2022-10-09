@@ -1,10 +1,10 @@
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 
 use anyhow::Result;
 
+use crate::{MessageType, NewTestMessage, Protocol, Role};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use crate::{MessageType, NewTestMessage};
 
 // package format:
 // msg_type(2 bytes) len(4 bytes) data
@@ -28,16 +28,19 @@ impl ConnectedClient {
         match msg_type {
             MessageType::NewTest => {
                 let mut buf: Vec<u8> = Vec::with_capacity(len as usize);
-                crate::read_n(&socket, &mut buf, len as usize).await.unwrap();
+                crate::read_n(&socket, &mut buf, len as usize)
+                    .await
+                    .unwrap();
                 let message: NewTestMessage = serde_json::from_slice(buf.as_slice()).unwrap();
-                println!("{:?}", message);
             }
             _ => {
                 todo!()
             }
         }
     }
-
+    async fn handle_new_test(message: NewTestMessage) -> Result<()> {
+        Ok(())
+    }
     async fn read_control_info(socket: &mut TcpStream) -> Result<(MessageType, u32)> {
         let mut buf: Vec<u8> = Vec::with_capacity(CONTROL_MSG_SIZE);
         crate::read_n(socket, &mut buf, CONTROL_MSG_SIZE).await?;
@@ -52,13 +55,13 @@ impl ConnectedClient {
 
 #[derive(Debug)]
 pub struct ServerConfig {
-    pub addr: SocketAddr
+    pub addr: SocketAddr,
 }
 
 #[derive(Debug)]
 pub struct Server {
     listener: TcpListener,
-    com_rx: mpsc::Receiver<ControlMessage>
+    com_rx: mpsc::Receiver<ControlMessage>,
 }
 
 impl Server {
@@ -66,11 +69,8 @@ impl Server {
         let (com_tx, com_rx) = mpsc::channel(10);
         let listener = TcpListener::bind(&config.addr).await?;
         log::info!("Server listening on {}", config.addr);
-        
-        Ok((Server {
-            listener,
-            com_rx
-        }, com_tx))
+
+        Ok((Server { listener, com_rx }, com_tx))
     }
 
     pub async fn accept(&mut self) -> Result<()> {
@@ -88,7 +88,7 @@ impl Server {
                         log::info!("Shutting down server...");
                         println!("Shutting down server");
                         break;
-                    } 
+                    }
                 }
             }
         }
@@ -99,5 +99,5 @@ impl Server {
 
 #[derive(Debug)]
 pub enum ControlMessage {
-    Stop
+    Stop,
 }

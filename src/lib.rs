@@ -1,15 +1,21 @@
 #![allow(dead_code)]
+#![warn(missing_debug_implementations)]
+extern crate core;
+
 mod client;
 mod server;
+mod test;
 
 pub use crate::client::{Client, ClientConfig};
-pub use crate::server::{Server, ServerConfig, ControlMessage};
-
+pub use crate::server::{ControlMessage, Server, ServerConfig};
+pub use crate::test::{Test, TestSetup};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use tokio::net::TcpStream;
 use std::io;
+use std::net::SocketAddr;
+use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 #[derive(Debug)]
 pub enum MessageType {
     NewTest,
@@ -32,22 +38,28 @@ impl TryFrom<u16> for MessageType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-enum Direction {
+pub enum Direction {
     ClientToServer,
     ServerToClient,
     Bidirectional,
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     TCP,
     UDP,
     DCCP,
     SCTP,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Role {
+    Client,
+    Server,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -64,6 +76,8 @@ pub enum NBError {
     ConnectionClosed,
     #[error("Invalid message type {0}")]
     InvalidMessageType(u16),
+    #[error("The socket has not yet been connected")]
+    NotConnected,
 }
 
 async fn read_n(socket: &TcpStream, result: &mut Vec<u8>, n: usize) -> Result<()> {
@@ -84,9 +98,9 @@ async fn read_n(socket: &TcpStream, result: &mut Vec<u8>, n: usize) -> Result<()
             Ok(val) => {
                 to_be_read -= val;
                 result.extend_from_slice(&buf[0..val]);
-            },
+            }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-            Err(e) => return Err(e.into())
+            Err(e) => return Err(e.into()),
         }
     }
 
@@ -104,9 +118,9 @@ async fn write_n(socket: &TcpStream, mut data: &mut [u8], n: usize) -> Result<()
             Ok(val) => {
                 to_be_written -= val;
                 data = &mut data[to_be_written..];
-            },
+            }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-            Err(e) => return Err(e.into())
+            Err(e) => return Err(e.into()),
         }
     }
 
@@ -114,7 +128,7 @@ async fn write_n(socket: &TcpStream, mut data: &mut [u8], n: usize) -> Result<()
 }
 
 #[cfg(test)]
-mod test {
+mod unit_tests {
     use super::*;
 
     #[test]

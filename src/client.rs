@@ -1,9 +1,9 @@
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 
+use crate::{Direction, NewTestMessage, Protocol};
 use anyhow::Result;
-use crate::{NewTestMessage, Protocol, Direction};
 
-use tokio::net::{TcpStream};
+use tokio::net::TcpStream;
 
 #[derive(Debug)]
 pub struct ClientConfig {
@@ -22,10 +22,10 @@ impl Client {
     }
 
     pub async fn start_new_test(&self) -> Result<()> {
-        let msg = NewTestMessage{
+        let msg = NewTestMessage {
             bw: 0,
             direction: Direction::ClientToServer,
-            protocol: Protocol::TCP
+            protocol: Protocol::TCP,
         };
         let mut msg = serde_json::to_vec(&msg)?;
         let mut data = Vec::with_capacity(msg.len() + 6);
