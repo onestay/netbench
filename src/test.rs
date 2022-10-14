@@ -2,6 +2,8 @@ use crate::{Direction, NBError, Role};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::boxed::Box;
+use std::fmt::Debug;
+use std::io::{Result as IOResult, ErrorKind, Error as IOError};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -9,6 +11,8 @@ use time::{Duration, OffsetDateTime};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time as t_time;
+
+#[derive(Debug)]
 struct UDPTest;
 
 impl UDPTest {
@@ -16,6 +20,7 @@ impl UDPTest {
         UDPTest {}
     }
 }
+
 
 #[async_trait]
 impl TestFunction for UDPTest {
@@ -27,15 +32,24 @@ impl TestFunction for UDPTest {
         todo!()
     }
 
-    async fn send(&self, buf: &[u8], sent: &mut usize) -> Result<()> {
+    fn write(&self, buf: &[u8], sent: &mut usize) -> Result<()> {
         todo!()
     }
 
-    async fn recv(&self, mut buf: &mut [u8], sent: &mut usize) -> Result<()> {
+    fn read(&self, mut buf: &mut [u8], sent: &mut usize) -> Result<()> {
+        todo!()
+    }
+
+    async fn readable(&self) -> IOResult<()> {
+        todo!()
+    }
+
+    async fn writable(&self) -> IOResult<()> {
         todo!()
     }
 }
 
+#[derive(Debug)]
 struct TCPTest {
     socket: Option<TcpStream>,
     addr: SocketAddr,
@@ -74,10 +88,9 @@ impl TestFunction for TCPTest {
         Ok(())
     }
 
-    async fn send(&self, buf: &[u8], sent: &mut usize) -> Result<()> {
+    fn write(&self, buf: &[u8], sent: &mut usize) -> Result<()> {
         //println!("Called send");
         if let Some(socket) = &self.socket {
-            socket.writable().await?;
             let result = socket.try_write(buf)?;
             *sent += result;
         }
@@ -85,24 +98,34 @@ impl TestFunction for TCPTest {
         Err(NBError::NotConnected.into())
     }
 
-    async fn recv(&self, mut buf: &mut [u8], recv: &mut usize) -> Result<()> {
+    fn read(&self, buf: &mut [u8], recv: &mut usize) -> Result<()> {
         //println!("Called recv");
         if let Some(socket) = &self.socket {
-            socket.readable().await?;
             let result = socket.try_read(buf)?;
             *recv += result;
         }
 
         Err(NBError::NotConnected.into())
     }
+
+    async fn readable(&self) -> IOResult<()> {
+        self.socket.as_ref().unwrap().readable().await
+    }
+
+    async fn writable(&self) -> IOResult<()> {
+        self.socket.as_ref().unwrap().writable().await
+    }
 }
 
+
 #[async_trait]
-trait TestFunction {
+trait TestFunction: Debug + Send {
     async fn connect(&mut self) -> Result<()>;
     async fn accept(&mut self) -> Result<()>;
-    async fn send(&self, buf: &[u8], sent: &mut usize) -> Result<()>;
-    async fn recv(&self, mut buf: &mut [u8], recv: &mut usize) -> Result<()>;
+    fn write(&self, buf: &[u8], sent: &mut usize) -> Result<()>;
+    fn read(&self, buf: &mut [u8], recv: &mut usize) -> Result<()>;
+    async fn readable(&self) -> IOResult<()>;
+    async fn writable(&self) -> IOResult<()>;
 }
 
 #[derive(Debug)]
@@ -130,17 +153,18 @@ pub struct TestResult {
     intervals: Vec<TestInterval>,
 }
 
+#[derive(Debug)]
 pub struct Test {
-    funcs: Box<dyn TestFunction + Send>,
+    funcs: Box<dyn TestFunction>,
     setup: Arc<TestSetup>,
 }
 
 impl Test {
     pub async fn new(setup: TestSetup) -> Result<Self> {
-        let funcs: Box<dyn TestFunction + Send> = match setup.protocol {
+        let funcs: Box<dyn TestFunction> = match setup.protocol {
             crate::Protocol::TCP => {
                 println!("Creating new TCP test");
-                Box::new(TCPTest::new(&setup).await) as Box<dyn TestFunction + Send>
+                Box::new(TCPTest::new(&setup).await) as Box<dyn TestFunction>
             }
             crate::Protocol::UDP => Box::new(UDPTest::new()),
             _ => {
@@ -164,53 +188,106 @@ impl Test {
         let tmp_funcs = self.funcs;
         let setup_clone = self.setup.clone();
         let send_task = tokio::spawn(async move { Self::run_rw(tmp_funcs, setup_clone, tx).await });
+
         let mut time_this_interval = OffsetDateTime::now_utc();
         let mut remaining = self.setup.duration;
+
         while !(remaining.is_zero() || remaining.is_negative()) {
             if OffsetDateTime::now_utc() - time_this_interval >= self.setup.intervals {
                 let (oneshot_rx, oneshot_tx) = oneshot::channel();
                 rx.send((ControlMessage::GetInterval, oneshot_rx)).await?;
-                //let result = oneshot_tx.await?;
-                //results.intervals.push(result);
+
+                let result = oneshot_tx.await?;
+                results.intervals.push(result);
+
                 time_this_interval = OffsetDateTime::now_utc();
                 remaining -= self.setup.intervals;
             }
             t_time::sleep(StdDuration::from_millis(100)).await;
         }
+
         let (oneshot_rx, oneshot_tx) = oneshot::channel();
         rx.send((ControlMessage::StopTest, oneshot_rx)).await?;
-        //let result = oneshot_tx.await?;
-        //results.intervals.push(result);
+        let result = oneshot_tx.await?;
+
+        results.intervals.push(result);
+        println!("{:?}", results.intervals);
+        
         Ok(results)
     }
 
     async fn run_rw(
-        funcs: Box<dyn TestFunction + Send>,
+        funcs: Box<dyn TestFunction>,
         setup: Arc<TestSetup>,
         mut tx: mpsc::Receiver<(ControlMessage, oneshot::Sender<TestInterval>)>,
     ) {
         println!("Starting run_rw");
         let should_send = Self::should_send(&*setup);
         let should_receive = Self::should_receive(&*setup);
-        let send_buf = vec![0_u8; 128 * 1024].into_boxed_slice();
+        let send_buf = vec![0_u8; 1500].into_boxed_slice();
         let mut rcv_buf = vec![0_u8; 128 * 1024].into_boxed_slice();
         let mut sent = 0_usize;
         let mut recv = 0_usize;
         loop {
             tokio::select! {
-                res = funcs.send(&send_buf, &mut sent), if should_send => {}
-                res = funcs.recv(&mut rcv_buf, &mut recv), if should_receive => {}
+                res = funcs.writable(), if should_send => {
+                    if res.is_ok() {
+                        if let Err(e) = funcs.write(&send_buf, &mut sent) {
+                            // TODO: make this look a bit nicer when eRFC 2497 is stable
+                            if let Some(e) = e.downcast_ref::<IOError>() {
+                                if e.kind() == ErrorKind::WouldBlock {
+                                    continue;
+                                }
+                            }
+                            log::error!("Error during write: {}", e);
+                        }
+                    }
+                }
+                res = funcs.readable(), if should_receive => {
+                    if res.is_ok() {
+                        if let Err(e) = funcs.read(&mut rcv_buf,  &mut recv) {
+                            // TODO: make this look a bit nicer when eRFC 2497 is stable
+                            if let Some(e) = e.downcast_ref::<IOError>() {
+                                if e.kind() == ErrorKind::WouldBlock {
+                                    continue;
+                                }
+                            }
+                            log::error!("Error during write: {}", e);
+                        }
+                    }
+                }
                 msg = tx.recv() => {
                     match msg {
                         Some((ControlMessage::GetInterval, ch)) => {
                             let mbps_sent = (sent * 8) as f64 * 1e-6;
                             let mbps_recv = (recv * 8) as f64 * 1e-6;
                             println!("Called GetInterval from {:?}. Sent: {} ({} mbit/s), recv: {} ({} mbit/s).", setup.role, sent, mbps_sent, recv, mbps_recv);
+                            let interval = TestInterval {
+                                bytes_recv: recv,
+                                bytes_sent: sent,
+                                bits_per_sec: 0,
+                                start: Duration::new(0,0),
+                                end: Duration::new(0, 0)
+                            };
                             sent = 0;
                             recv = 0;
+                            ch.send(interval).unwrap();
                         },
                         Some((ControlMessage::StopTest, ch)) => {
                             println!("Called StopTest from {:?}", setup.role);
+                            let mbps_sent = (sent * 8) as f64 * 1e-6;
+                            let mbps_recv = (recv * 8) as f64 * 1e-6;
+                            println!("Called GetInterval from {:?}. Sent: {} ({} mbit/s), recv: {} ({} mbit/s).", setup.role, sent, mbps_sent, recv, mbps_recv);
+                            let interval = TestInterval {
+                                bytes_recv: recv,
+                                bytes_sent: sent,
+                                bits_per_sec: 0,
+                                start: Duration::new(0,0),
+                                end: Duration::new(0, 0)
+                            };
+                            sent = 0;
+                            recv = 0;
+                            ch.send(interval).unwrap();
                             break;
                         },
                         None => {
