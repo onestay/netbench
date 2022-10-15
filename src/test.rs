@@ -1,3 +1,4 @@
+use crate::token_bucket::TokenBucket;
 use crate::{Direction, Role};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -220,10 +221,11 @@ impl Test {
         let mut rcv_buf = vec![0_u8; 128 * 1024].into_boxed_slice();
         let mut sent = 0_usize;
         let mut recv = 0_usize;
+        let mut bucket = TokenBucket::new(50*1024, 50*1024);
+        
         loop {
             tokio::select! {
-                res = funcs.writable(), if should_send => {
-                    log::debug!("Socket is writable");
+                res = funcs.writable(), if should_send && bucket.try_consume(1500).is_ok() => {
                     if res.is_ok() {
                         if let Err(e) = funcs.write(&send_buf, &mut sent) {
                             // TODO: make this look a bit nicer when eRFC 2497 is stable
@@ -238,7 +240,6 @@ impl Test {
                     }
                 }
                 res = funcs.readable(), if should_receive => {
-                    log::debug!("Socket is readable");
                     if res.is_ok() {
                         if let Err(e) = funcs.read(&mut rcv_buf,  &mut recv) {
                             // TODO: make this look a bit nicer when eRFC 2497 is stable
