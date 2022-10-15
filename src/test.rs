@@ -1,4 +1,4 @@
-use crate::{Direction, NBError, Role};
+use crate::{Direction, Role};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::boxed::Box;
@@ -12,116 +12,108 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time as t_time;
 
-#[derive(Debug)]
-struct UDPTest;
+// #[derive(Debug)]
+// struct UDPTest;
 
-impl UDPTest {
-    pub fn new() -> Self {
-        UDPTest {}
-    }
-}
+// impl UDPTest {
+//     pub fn new() -> Self {
+//         UDPTest {}
+//     }
+// }
 
 
-#[async_trait]
-impl TestFunction for UDPTest {
-    async fn connect(&mut self) -> Result<()> {
-        todo!()
-    }
+// #[async_trait]
+// impl TestFunction for UDPTest {
+//     async fn connect(&mut self) -> Result<()> {
+//         todo!()
+//     }
 
-    async fn accept(&mut self) -> Result<()> {
-        todo!()
-    }
+//     async fn accept(&mut self) -> Result<()> {
+//         todo!()
+//     }
 
-    fn write(&self, buf: &[u8], sent: &mut usize) -> Result<()> {
-        todo!()
-    }
+//     fn write(&self, buf: &[u8], sent: &mut usize) -> Result<()> {
+//         todo!()
+//     }
 
-    fn read(&self, mut buf: &mut [u8], sent: &mut usize) -> Result<()> {
-        todo!()
-    }
+//     fn read(&self, mut buf: &mut [u8], sent: &mut usize) -> Result<()> {
+//         todo!()
+//     }
 
-    async fn readable(&self) -> IOResult<()> {
-        todo!()
-    }
+//     async fn readable(&self) -> IOResult<()> {
+//         todo!()
+//     }
 
-    async fn writable(&self) -> IOResult<()> {
-        todo!()
-    }
-}
+//     async fn writable(&self) -> IOResult<()> {
+//         todo!()
+//     }
+// }
 
 #[derive(Debug)]
 struct TCPTest {
-    socket: Option<TcpStream>,
+    socket: TcpStream,
     addr: SocketAddr,
 }
 
 impl TCPTest {
-    pub async fn new(setup: &TestSetup) -> Self {
-        let mut tcp_test = TCPTest {
-            socket: None,
-            addr: setup.addr,
-        };
-        if setup.role == Role::Server {
-            tcp_test.accept().await.unwrap();
+    pub async fn new(setup: &TestSetup) -> Result<Self> {
+        let socket = if setup.role == Role::Server {
+            TCPTest::accept(&setup.addr).await?
         } else {
-            tcp_test.connect().await.unwrap();
-        }
+            TCPTest::connect(&setup.addr).await?
+        };
 
-        tcp_test
+        Ok(TCPTest {
+            socket,
+            addr: setup.addr,
+        })
     }
+}
+
+impl TCPTest {
+    async fn connect(addr: &SocketAddr) -> Result<TcpStream> {
+        println!("Calling connect");
+        let socket = TcpStream::connect(addr).await?;
+        Ok(socket)
+    }
+
+    async fn accept(addr: &SocketAddr) -> Result<TcpStream> {
+        println!("Calling bind");
+        let listener = TcpListener::bind(addr).await?;
+        println!("calling accept");
+        let (socket, _) = listener.accept().await?;
+        Ok(socket)
+    }
+
 }
 
 #[async_trait]
 impl TestFunction for TCPTest {
-    async fn connect(&mut self) -> Result<()> {
-        println!("Calling connect");
-        self.socket = Some(TcpStream::connect(self.addr).await?);
-        Ok(())
-    }
-
-    async fn accept(&mut self) -> Result<()> {
-        println!("Calling bind");
-        let listener = TcpListener::bind(self.addr).await?;
-        println!("calling accept");
-        let (socket, _) = listener.accept().await?;
-        self.socket = Some(socket);
-        Ok(())
-    }
-
     fn write(&self, buf: &[u8], sent: &mut usize) -> Result<()> {
         //println!("Called send");
-        if let Some(socket) = &self.socket {
-            let result = socket.try_write(buf)?;
-            *sent += result;
-        }
-
-        Err(NBError::NotConnected.into())
+        let result = self.socket.try_write(buf)?;
+        *sent += result;
+        Ok(())
     }
 
     fn read(&self, buf: &mut [u8], recv: &mut usize) -> Result<()> {
         //println!("Called recv");
-        if let Some(socket) = &self.socket {
-            let result = socket.try_read(buf)?;
-            *recv += result;
-        }
-
-        Err(NBError::NotConnected.into())
+        let result = self.socket.try_read(buf)?;
+        *recv += result;
+        Ok(())
     }
 
     async fn readable(&self) -> IOResult<()> {
-        self.socket.as_ref().unwrap().readable().await
+        self.socket.readable().await
     }
 
     async fn writable(&self) -> IOResult<()> {
-        self.socket.as_ref().unwrap().writable().await
+        self.socket.writable().await
     }
 }
 
-
 #[async_trait]
 trait TestFunction: Debug + Send {
-    async fn connect(&mut self) -> Result<()>;
-    async fn accept(&mut self) -> Result<()>;
     fn write(&self, buf: &[u8], sent: &mut usize) -> Result<()>;
     fn read(&self, buf: &mut [u8], recv: &mut usize) -> Result<()>;
     async fn readable(&self) -> IOResult<()>;
@@ -164,9 +156,9 @@ impl Test {
         let funcs: Box<dyn TestFunction> = match setup.protocol {
             crate::Protocol::TCP => {
                 println!("Creating new TCP test");
-                Box::new(TCPTest::new(&setup).await) as Box<dyn TestFunction>
+                Box::new(TCPTest::new(&setup).await?) as Box<dyn TestFunction>
             }
-            crate::Protocol::UDP => Box::new(UDPTest::new()),
+            //crate::Protocol::UDP => Box::new(UDPTest::new()),
             _ => {
                 todo!()
             }
@@ -231,11 +223,13 @@ impl Test {
         loop {
             tokio::select! {
                 res = funcs.writable(), if should_send => {
+                    log::debug!("Socket is writable");
                     if res.is_ok() {
                         if let Err(e) = funcs.write(&send_buf, &mut sent) {
                             // TODO: make this look a bit nicer when eRFC 2497 is stable
                             if let Some(e) = e.downcast_ref::<IOError>() {
                                 if e.kind() == ErrorKind::WouldBlock {
+                                    log::debug!("WouldBlock Error in write");
                                     continue;
                                 }
                             }
@@ -244,11 +238,13 @@ impl Test {
                     }
                 }
                 res = funcs.readable(), if should_receive => {
+                    log::debug!("Socket is readable");
                     if res.is_ok() {
                         if let Err(e) = funcs.read(&mut rcv_buf,  &mut recv) {
                             // TODO: make this look a bit nicer when eRFC 2497 is stable
                             if let Some(e) = e.downcast_ref::<IOError>() {
                                 if e.kind() == ErrorKind::WouldBlock {
+                                    log::debug!("WouldBlock Error in read");
                                     continue;
                                 }
                             }
