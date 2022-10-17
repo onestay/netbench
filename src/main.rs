@@ -4,6 +4,7 @@ use std::env;
 use time::Duration;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    env_logger::init();
     let mut args = env::args();
     if args.len() < 2 {
         return Err(anyhow::format_err!("Usage netbench {{-c|-s}}"));
@@ -16,7 +17,7 @@ async fn main() -> Result<(), Error> {
             protocol: Protocol::TCP,
             duration: Duration::new(10, 0),
             intervals: Duration::new(1, 0),
-            addr: "10.0.0.10:5201".parse()?,
+            addr: "127.0.0.1:5201".parse()?,
         };
 
         let test_client = Test::new(setup_client).await?;
@@ -29,7 +30,7 @@ async fn main() -> Result<(), Error> {
             protocol: Protocol::TCP,
             duration: Duration::new(10, 0),
             intervals: Duration::new(1, 0),
-            addr: "10.0.0.10:5201".parse()?,
+            addr: "127.0.0.1:5201".parse()?,
         };
 
         let test_server = Test::new(setup_server).await?;
