@@ -5,6 +5,7 @@ extern crate core;
 mod client;
 mod server;
 mod test;
+mod token_bucket;
 
 pub use crate::client::{Client, ClientConfig};
 pub use crate::server::{ControlMessage, Server, ServerConfig};
@@ -78,6 +79,8 @@ pub enum NBError {
     InvalidMessageType(u16),
     #[error("The socket has not yet been connected")]
     NotConnected,
+    #[error("The bucket is empty, no tokens available")]
+    BucketEmpty
 }
 
 async fn read_n(socket: &TcpStream, result: &mut Vec<u8>, n: usize) -> Result<()> {
@@ -129,6 +132,8 @@ async fn write_n(socket: &TcpStream, mut data: &mut [u8], n: usize) -> Result<()
 
 #[cfg(test)]
 mod unit_tests {
+    use crate::token_bucket::TokenBucket;
+
     use super::*;
 
     #[test]
@@ -147,7 +152,6 @@ mod unit_tests {
         let mut data = String::from("Hello World, how are you?").into_bytes();
         let data_clone = data.clone();
         let n = data.len();
-
         // client thread
         let server = TcpListener::bind("127.0.0.1:3572").await.unwrap();
         let client_handle = tokio::spawn(async move {
