@@ -1,11 +1,11 @@
 use crate::token_bucket::TokenBucket;
-use crate::{Direction, Role};
+use crate::{Direction, Protocol, Role};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::boxed::Box;
 use std::fmt::Debug;
-use std::io::{Result as IOResult, ErrorKind, Error as IOError};
-use std::net::SocketAddr;
+use std::io::{Error as IOError, ErrorKind, Result as IOResult};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
@@ -21,7 +21,6 @@ use tokio::time as t_time;
 //         UDPTest {}
 //     }
 // }
-
 
 // #[async_trait]
 // impl TestFunction for UDPTest {
@@ -85,7 +84,6 @@ impl TCPTest {
         let (socket, _) = listener.accept().await?;
         Ok(socket)
     }
-
 }
 
 #[async_trait]
@@ -119,6 +117,32 @@ trait TestFunction: Debug + Send {
     fn read(&self, buf: &mut [u8], recv: &mut usize) -> Result<()>;
     async fn readable(&self) -> IOResult<()>;
     async fn writable(&self) -> IOResult<()>;
+}
+
+pub struct TestSetupBuilder {
+    direction: Direction,
+    role: Role,
+    protocol: crate::Protocol,
+    addresses: Vec<SocketAddr>,
+    duration: Duration,
+    intervals: Duration,
+}
+
+const DEFAULT_TEST_DURATION: Duration = Duration::seconds(10);
+const DEFAULT_TEST_INTERVAL: Duration = Duration::seconds(1);
+
+impl TestSetupBuilder {
+    pub fn server<A: ToSocketAddrs>(direction: Direction, addr: A) -> Result<Self> {
+        let addrs = addr.to_socket_addrs()?.collect::<Vec<SocketAddr>>();
+        Ok(TestSetupBuilder {
+            direction,
+            role: Role::Server,
+            protocol: Protocol::TCP,
+            addrs,
+            duration: DEFAULT_TEST_DURATION,
+            intervals: DEFAULT_TEST_INTERVAL,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -205,7 +229,7 @@ impl Test {
 
         results.intervals.push(result);
         println!("{:?}", results.intervals);
-        
+
         Ok(results)
     }
 
@@ -221,8 +245,8 @@ impl Test {
         let mut rcv_buf = vec![0_u8; 128 * 1024].into_boxed_slice();
         let mut sent = 0_usize;
         let mut recv = 0_usize;
-        let mut bucket = TokenBucket::new(50*1024, 50*1024);
-        
+        let mut bucket = TokenBucket::new(50 * 1024, 50 * 1024);
+
         loop {
             tokio::select! {
                 res = funcs.writable(), if should_send && bucket.try_consume(1500).is_ok() => {
