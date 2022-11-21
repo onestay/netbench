@@ -1,9 +1,12 @@
-use std::net::{SocketAddr, ToSocketAddrs};
 use anyhow::Result;
+use std::net::{SocketAddr, ToSocketAddrs};
 use time::Duration;
 
-use crate::{Role, Direction, Protocol};
-use super::{IPPref, test::{Test, TestSetup}};
+use super::{
+    test::{Test, TestSetup},
+    IPPref,
+};
+use crate::{Direction, Protocol, Role};
 
 #[derive(Debug)]
 pub struct TestBuilder {
@@ -13,14 +16,13 @@ pub struct TestBuilder {
     addresses: Vec<SocketAddr>,
     duration: Duration,
     intervals: Duration,
-    ip_pref: Option<IPPref>
+    ip_pref: Option<IPPref>,
 }
 
 const DEFAULT_TEST_DURATION: Duration = Duration::seconds(10);
 const DEFAULT_TEST_INTERVAL: Duration = Duration::seconds(1);
 
 impl TestBuilder {
-
     pub fn server<A: ToSocketAddrs>(addr: A) -> Result<Self> {
         TestBuilder::new(addr, Role::Server)
     }
@@ -42,7 +44,7 @@ impl TestBuilder {
             addresses,
             duration: DEFAULT_TEST_DURATION,
             intervals: DEFAULT_TEST_INTERVAL,
-            ip_pref: None
+            ip_pref: None,
         })
     }
 
@@ -72,9 +74,9 @@ impl TestBuilder {
     }
 
     pub async fn build(self) -> Result<Test> {
-        let (v4, v6): (Vec<SocketAddr>, Vec<SocketAddr>) = self.addresses.into_iter()
-                        .partition(|addr| addr.is_ipv4());
-                        
+        let (v4, v6): (Vec<SocketAddr>, Vec<SocketAddr>) =
+            self.addresses.into_iter().partition(|addr| addr.is_ipv4());
+
         assert!(!v4.is_empty() || !v6.is_empty());
 
         let addr = match self.ip_pref {
@@ -86,7 +88,7 @@ impl TestBuilder {
                 } else {
                     v4[0]
                 }
-            },
+            }
         };
 
         let setup = TestSetup {
@@ -100,5 +102,4 @@ impl TestBuilder {
 
         Test::new(setup).await
     }
-
 }

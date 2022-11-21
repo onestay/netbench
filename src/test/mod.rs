@@ -1,8 +1,8 @@
 mod builder;
 mod test;
 
-pub use test::*;
 pub use builder::*;
+pub use test::*;
 #[derive(Debug)]
 enum ControlMessage {
     StopTest,
@@ -12,5 +12,5 @@ enum ControlMessage {
 #[derive(Debug)]
 enum IPPref {
     V4,
-    V6
+    V6,
 }

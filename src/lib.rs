@@ -9,7 +9,7 @@ mod token_bucket;
 
 pub use crate::client::{Client, ClientConfig};
 pub use crate::server::{ControlMessage, Server, ServerConfig};
-pub use crate::test::{Test, TestSetup, TestBuilder};
+pub use crate::test::{Test, TestBuilder, TestSetup};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -80,7 +80,7 @@ pub enum NBError {
     #[error("The socket has not yet been connected")]
     NotConnected,
     #[error("The bucket is empty, no tokens available")]
-    BucketEmpty
+    BucketEmpty,
 }
 
 async fn read_n(socket: &TcpStream, result: &mut Vec<u8>, n: usize) -> Result<()> {

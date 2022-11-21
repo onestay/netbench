@@ -1,6 +1,6 @@
-use time::OffsetDateTime;
-use std::cmp;
 use crate::NBError;
+use std::cmp;
+use time::OffsetDateTime;
 
 #[derive(Debug)]
 pub struct TokenBucket {
@@ -42,7 +42,6 @@ impl TokenBucket {
         Ok(())
     }
 }
-
 
 #[cfg(test)]
 mod test {
