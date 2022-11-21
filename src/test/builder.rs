@@ -20,7 +20,16 @@ const DEFAULT_TEST_DURATION: Duration = Duration::seconds(10);
 const DEFAULT_TEST_INTERVAL: Duration = Duration::seconds(1);
 
 impl TestBuilder {
+
+    pub fn server<A: ToSocketAddrs>(addr: A) -> Result<Self> {
+        TestBuilder::new(addr, Role::Server)
+    }
+
     pub fn client<A: ToSocketAddrs>(addr: A) -> Result<Self> {
+        TestBuilder::new(addr, Role::Client)
+    }
+
+    fn new<A: ToSocketAddrs>(addr: A, role: Role) -> Result<Self> {
         let addresses = addr.to_socket_addrs()?.collect::<Vec<SocketAddr>>();
         if addresses.is_empty() {
             panic!("Couldn't resolve addr to a SocketAddr");
@@ -28,7 +37,7 @@ impl TestBuilder {
 
         Ok(TestBuilder {
             direction: Direction::ClientToServer,
-            role: Role::Client,
+            role,
             protocol: Protocol::TCP,
             addresses,
             duration: DEFAULT_TEST_DURATION,
