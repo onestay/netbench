@@ -148,6 +148,7 @@ dependencies = [
  "async-trait",
  "env_logger",
  "log",
+ "parking_lot",
  "serde",
  "serde_json",
  "thiserror",
