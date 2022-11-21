@@ -9,7 +9,7 @@ mod token_bucket;
 
 pub use crate::client::{Client, ClientConfig};
 pub use crate::server::{ControlMessage, Server, ServerConfig};
-pub use crate::test::{Test, TestSetup};
+pub use crate::test::{Test, TestSetup, TestBuilder};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io;

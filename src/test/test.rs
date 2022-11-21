@@ -1,11 +1,12 @@
 use crate::token_bucket::TokenBucket;
-use crate::{Direction, Protocol, Role};
+use super::ControlMessage;
+use crate::{Direction, Role};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::boxed::Box;
 use std::fmt::Debug;
 use std::io::{Error as IOError, ErrorKind, Result as IOResult};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr};
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use time::{Duration, OffsetDateTime};
@@ -119,31 +120,7 @@ trait TestFunction: Debug + Send {
     async fn writable(&self) -> IOResult<()>;
 }
 
-pub struct TestSetupBuilder {
-    direction: Direction,
-    role: Role,
-    protocol: crate::Protocol,
-    addresses: Vec<SocketAddr>,
-    duration: Duration,
-    intervals: Duration,
-}
 
-const DEFAULT_TEST_DURATION: Duration = Duration::seconds(10);
-const DEFAULT_TEST_INTERVAL: Duration = Duration::seconds(1);
-
-impl TestSetupBuilder {
-    pub fn server<A: ToSocketAddrs>(direction: Direction, addr: A) -> Result<Self> {
-        let addrs = addr.to_socket_addrs()?.collect::<Vec<SocketAddr>>();
-        Ok(TestSetupBuilder {
-            direction,
-            role: Role::Server,
-            protocol: Protocol::TCP,
-            addrs,
-            duration: DEFAULT_TEST_DURATION,
-            intervals: DEFAULT_TEST_INTERVAL,
-        })
-    }
-}
 
 #[derive(Debug)]
 pub struct TestSetup {
@@ -194,17 +171,17 @@ impl Test {
         })
     }
 
-    pub async fn run(mut self) -> Result<TestResult> {
+    pub async fn run(self) -> Result<TestResult> {
         println!("Starting test");
         let mut results = TestResult {
             start_time: OffsetDateTime::now_utc(),
-            intervals: Vec::new(),
+            intervals: Vec::with_capacity(((self.setup.duration / self.setup.intervals) + 1.0) as usize),
         };
         // setup control channels
         let (rx, tx) = mpsc::channel::<(ControlMessage, oneshot::Sender<TestInterval>)>(100);
-        let tmp_funcs = self.funcs;
+        let funcs_clone = self.funcs;
         let setup_clone = self.setup.clone();
-        let send_task = tokio::spawn(async move { Self::run_rw(tmp_funcs, setup_clone, tx).await });
+        let send_task = tokio::spawn(async move { Self::run_rw(funcs_clone, setup_clone, tx).await });
 
         let mut time_this_interval = OffsetDateTime::now_utc();
         let mut remaining = self.setup.duration;
@@ -229,7 +206,7 @@ impl Test {
 
         results.intervals.push(result);
         println!("{:?}", results.intervals);
-
+        send_task.await?;
         Ok(results)
     }
 
@@ -239,8 +216,8 @@ impl Test {
         mut tx: mpsc::Receiver<(ControlMessage, oneshot::Sender<TestInterval>)>,
     ) {
         println!("Starting run_rw");
-        let should_send = Self::should_send(&*setup);
-        let should_receive = Self::should_receive(&*setup);
+        let should_send = Self::should_send(&setup);
+        let should_receive = Self::should_receive(&setup);
         let send_buf = vec![0_u8; 1500].into_boxed_slice();
         let mut rcv_buf = vec![0_u8; 128 * 1024].into_boxed_slice();
         let mut sent = 0_usize;
@@ -375,8 +352,3 @@ mod test_test {
     }
 }
 
-#[derive(Debug)]
-enum ControlMessage {
-    StopTest,
-    GetInterval,
-}
