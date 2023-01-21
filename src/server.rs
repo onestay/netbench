@@ -1,14 +1,13 @@
 use std::net::SocketAddr;
 
 use anyhow::Result;
+use tokio::io::AsyncReadExt;
+use tracing::{info, trace};
 
-use crate::{MessageType, NewTestMessage, Protocol, Role};
+use crate::{MessageType, NewTestMessage, CONTROL_MSG_SIZE};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
-// package format:
-// msg_type(2 bytes) len(4 bytes) data
-const CONTROL_MSG_SIZE: usize = 6;
 struct ConnectedClient {
     socket: TcpStream,
     addr: SocketAddr,
@@ -16,22 +15,22 @@ struct ConnectedClient {
 
 impl ConnectedClient {
     pub(crate) async fn init(socket: TcpStream, addr: SocketAddr) {
-        println!("Handling new client from {:?}", addr);
+        info!("Handling new client from {:?}", addr);
         ConnectedClient::msg_loop(socket).await;
     }
 
     async fn msg_loop(mut socket: TcpStream) {
         // read control information:
-        let (msg_type, len) = ConnectedClient::read_control_info(&mut socket)
+        let msg_type = ConnectedClient::read_control_info(&mut socket)
             .await
             .unwrap();
         match msg_type {
-            MessageType::NewTest => {
-                let mut buf: Vec<u8> = Vec::with_capacity(len as usize);
-                crate::read_n(&socket, &mut buf, len as usize)
-                    .await
-                    .unwrap();
+            MessageType::NewTest(len) => {
+                let mut buf = vec![0; len];
+                socket.read_exact(buf.as_mut_slice()).await.unwrap();
                 let message: NewTestMessage = serde_json::from_slice(buf.as_slice()).unwrap();
+                trace!("{message:?}");
+                
             }
             _ => {
                 todo!()
@@ -41,15 +40,16 @@ impl ConnectedClient {
     async fn handle_new_test(message: NewTestMessage) -> Result<()> {
         Ok(())
     }
-    async fn read_control_info(socket: &mut TcpStream) -> Result<(MessageType, u32)> {
-        let mut buf: Vec<u8> = Vec::with_capacity(CONTROL_MSG_SIZE);
-        crate::read_n(socket, &mut buf, CONTROL_MSG_SIZE).await?;
+    async fn read_control_info(socket: &mut TcpStream) -> Result<MessageType> {
+        let mut buf = [0; CONTROL_MSG_SIZE];
+        socket.read_exact(&mut buf).await?;
+        trace!("{buf:?}");
 
         let msg_type = u16::from_be_bytes(buf[..2].try_into()?);
-        let msg_type = MessageType::try_from(msg_type)?;
         let len = u32::from_be_bytes(buf[2..6].try_into()?);
 
-        Ok((msg_type, len))
+        let msg_type = MessageType::new(msg_type, len as usize)?;
+        Ok(msg_type)
     }
 }
 
@@ -68,7 +68,7 @@ impl Server {
     pub async fn new(config: ServerConfig) -> Result<(Self, mpsc::Sender<ControlMessage>)> {
         let (com_tx, com_rx) = mpsc::channel(10);
         let listener = TcpListener::bind(&config.addr).await?;
-        log::info!("Server listening on {}", config.addr);
+        info!("Server listening on {}", config.addr);
 
         Ok((Server { listener, com_rx }, com_tx))
     }
@@ -78,15 +78,14 @@ impl Server {
             tokio::select! {
                 Ok((socket, addr)) = self.listener.accept() => {
                     tokio::spawn(async move {
-                        println!("New client!");
+                        info!("New connection from {addr}");
                         ConnectedClient::init(socket, addr).await
                     });
                 }
                 msg = self.com_rx.recv() => {
                     // Currently there's only the stop message, that's why this is okay
                     if msg.is_some() {
-                        log::info!("Shutting down server...");
-                        println!("Shutting down server");
+                        info!("Shutting down server...");
                         break;
                     }
                 }

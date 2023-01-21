@@ -1,41 +1,36 @@
 use anyhow::Error;
-use netbench::{Direction, Protocol, Role, Test, TestSetup};
+use netbench::{Client, ClientConfig, Direction, Protocol, Role, Server, ServerConfig};
 use std::env;
 use time::Duration;
+use tracing::Level;
+use tracing_subscriber::filter::EnvFilter;
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    env_logger::init();
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("netbench=trace"));
+    tracing_subscriber::fmt()
+        .with_max_level(Level::TRACE)
+        .with_env_filter(env_filter)
+        .init();
+
     let mut args = env::args();
     if args.len() < 2 {
         return Err(anyhow::format_err!("Usage netbench {{-c|-s}}"));
     }
     args.next();
     if args.next().unwrap() == "-c" {
-        let setup_client = TestSetup {
-            role: Role::Client,
-            direction: Direction::ClientToServer,
-            protocol: Protocol::TCP,
-            duration: Duration::new(10, 0),
-            intervals: Duration::new(1, 0),
-            addr: "127.0.0.1:5201".parse()?,
+        let config = ClientConfig {
+            addr: "127.0.0.1:5201".parse().unwrap(),
         };
-
-        let test_client = Test::new(setup_client).await?;
-
-        test_client.run().await?;
+        let mut c = Client::new(config).await.unwrap();
+        c.start_new_test().await.unwrap();
     } else {
-        let setup_server = TestSetup {
-            role: Role::Server,
-            direction: Direction::ClientToServer,
-            protocol: Protocol::TCP,
-            duration: Duration::new(10, 0),
-            intervals: Duration::new(1, 0),
-            addr: "127.0.0.1:5201".parse()?,
+        let config = ServerConfig {
+            addr: "127.0.0.1:5201".parse().unwrap(),
         };
-
-        let test_server = Test::new(setup_server).await?;
-
-        test_server.run().await?;
+        let (mut server, _) = Server::new(config).await.unwrap();
+        server.accept().await.unwrap();
     }
 
     Ok(())

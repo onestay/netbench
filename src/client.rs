@@ -1,9 +1,9 @@
 use std::net::SocketAddr;
 
-use crate::{Direction, NewTestMessage, Protocol};
+use crate::{Direction, NewTestMessage, Protocol, CONTROL_MSG_SIZE};
 use anyhow::Result;
 
-use tokio::net::TcpStream;
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 #[derive(Debug)]
 pub struct ClientConfig {
@@ -21,19 +21,18 @@ impl Client {
         Ok(Client { stream })
     }
 
-    pub async fn start_new_test(&self) -> Result<()> {
+    pub async fn start_new_test(&mut self) -> Result<()> {
         let msg = NewTestMessage {
             bw: 0,
             direction: Direction::ClientToServer,
             protocol: Protocol::TCP,
         };
         let mut msg = serde_json::to_vec(&msg)?;
-        let mut data = Vec::with_capacity(msg.len() + 6);
+        let mut data = Vec::with_capacity(msg.len() + CONTROL_MSG_SIZE);
         data.extend_from_slice(&0_u16.to_be_bytes());
         data.extend_from_slice(&(msg.len() as u32).to_be_bytes());
         data.append(&mut msg);
-        let n = data.len();
-        crate::write_n(&self.stream, data.as_mut_slice(), n).await?;
+        self.stream.write_all(&mut data).await?;
         Ok(())
     }
 }
