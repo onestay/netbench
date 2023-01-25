@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -53,6 +54,8 @@ impl ConnectedClient {
             .unwrap();
         match msg_type {
             MessageType::NewTest(len) => {
+                println!("{}\nNew test submitted from {}", SEPARATOR, self.addr);
+
                 trace!("reading NewTestMessage with len {len}");
                 let mut buf = vec![0; len];
                 self.socket.read_exact(buf.as_mut_slice()).await.unwrap();
@@ -115,12 +118,14 @@ pub struct Server {
     outstanding_tests: Arc<Mutex<Vec<NewTestMessage>>>,
 }
 
+const SEPARATOR: &str = "-----------------------";
+
 impl Server {
     pub async fn new(config: ServerConfig) -> Result<(Self, mpsc::Sender<ControlMessage>)> {
         let (com_tx, com_rx) = mpsc::channel(10);
         let listener = TcpListener::bind(&config.addr).await?;
         debug!("Server listening on {}", config.addr);
-
+        println!("Server ready to accept connections on {}", config.addr);
         Ok((
             Server {
                 listener,

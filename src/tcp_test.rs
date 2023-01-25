@@ -177,7 +177,7 @@ impl Test for TCPTest {
                                 TestControlMessage::GetIntervalResult(chan) => {
                                     //info!("{:?}", get_tcp_info(self.socket.as_raw_fd()));
                                     let mut interval_to_send = std::mem::take(&mut interval);
-                                    interval_to_send.update_end_time();
+                                    interval_to_send.prepare_to_send();
                                     if chan.send(interval_to_send).is_err() {
                                         error!("failed to send interval results");
                                     }

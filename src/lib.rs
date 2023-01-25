@@ -8,6 +8,8 @@ mod tcp_test;
 mod test_manager;
 mod token_bucket;
 
+use std::fmt;
+
 pub use crate::client::{Client, ClientConfig};
 pub use crate::server::{ControlMessage, Server, ServerConfig};
 use serde::{Deserialize, Serialize};
@@ -65,6 +67,17 @@ pub enum Protocol {
     UDP,
     DCCP,
     SCTP,
+}
+
+impl fmt::Display for Protocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Protocol::TCP => write!(f, "TCP"),
+            Protocol::UDP => write!(f, "UDP"),
+            Protocol::DCCP => write!(f, "DCCP"),
+            Protocol::SCTP => write!(f, "SCTP"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

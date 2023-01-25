@@ -22,5 +22,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = { version = "0.8" }
 parking_lot = { version = "0.12" }
-console-subscriber = "0.1.8"
 libc = "0.2.139"
+clap = { version = "4.1.4", features = ["derive"] }
+termcolor = "1.2.0"
