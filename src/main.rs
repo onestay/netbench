@@ -1,7 +1,6 @@
 use anyhow::Error;
-use clap::{value_parser, Arg, ArgAction, Command, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use netbench::{Client, ClientConfig, Server, ServerConfig};
-use std::env;
 use tracing::Level;
 use tracing_subscriber::filter::EnvFilter;
 
