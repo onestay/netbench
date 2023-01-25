@@ -1,7 +1,6 @@
 use anyhow::Error;
-use netbench::{Client, ClientConfig, Direction, Protocol, Role, Server, ServerConfig};
+use netbench::{Client, ClientConfig, Server, ServerConfig};
 use std::env;
-use time::Duration;
 use tracing::Level;
 use tracing_subscriber::filter::EnvFilter;
 
