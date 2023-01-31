@@ -82,12 +82,6 @@ pub(crate) struct TcpInfo {
     snd_wnd: u32,
 }
 
-pub(crate) struct TCPTest {
-    socket: TcpStream,
-    test_info: NewTestMessage,
-    role: Role,
-}
-
 #[cfg(target_os = "linux")]
 fn get_tcp_info(sockfd: c_int) -> Option<TcpInfo> {
     let mut tcp_info = TcpInfo::default();
@@ -106,11 +100,13 @@ fn get_tcp_info(sockfd: c_int) -> Option<TcpInfo> {
         }
     }
 
-    if tcp_info != TcpInfo::default() {
-        Some(tcp_info)
-    } else {
-        None
-    }
+    Some(tcp_info)
+}
+
+pub(crate) struct TCPTest {
+    socket: TcpStream,
+    test_info: NewTestMessage,
+    role: Role,
 }
 
 impl Test for TCPTest {
@@ -120,8 +116,8 @@ impl Test for TCPTest {
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut interval = IntervalResult::default();
-            let mut read_buf = [0; 4096];
-            let send_buf = [0xAB; 4096];
+            let mut read_buf = [0; 1024 * 128];
+            let send_buf = [0xAB; 1024 * 128];
             let mut is_done = false;
             let (mut n_send, mut n_read, mut n_chan) = (0, 0, 0);
             loop {

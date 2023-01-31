@@ -9,7 +9,7 @@ mod test_manager;
 mod token_bucket;
 
 use std::collections::HashMap;
-use std::fmt::{self, Write};
+use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
