@@ -233,6 +233,7 @@ dependencies = [
  "async-trait",
  "clap",
  "libc",
+ "once_cell",
  "parking_lot",
  "rand",
  "serde",

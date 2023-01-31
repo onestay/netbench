@@ -10,7 +10,7 @@ use crate::{
     tcp_test::TCPTest, MessageType, NewTestMessage, Protocol, TestAssociationMessage,
     CONTROL_MSG_SIZE,
 };
-use crate::{test_manager, Role};
+use crate::{test_manager, Role, ServerConfig};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
@@ -103,11 +103,6 @@ impl ConnectedClient {
         let msg_type = MessageType::new(msg_type, len as usize)?;
         Ok(msg_type)
     }
-}
-
-#[derive(Debug)]
-pub struct ServerConfig {
-    pub addr: SocketAddr,
 }
 
 #[derive(Debug)]

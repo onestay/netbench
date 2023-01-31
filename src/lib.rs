@@ -8,14 +8,19 @@ mod tcp_test;
 mod test_manager;
 mod token_bucket;
 
-use std::fmt;
+use std::collections::HashMap;
+use std::fmt::{self, Write};
+use std::net::SocketAddr;
+use std::path::PathBuf;
 
-pub use crate::client::{Client, ClientConfig};
-pub use crate::server::{ControlMessage, Server, ServerConfig};
+pub use crate::client::Client;
+pub use crate::server::{ControlMessage, Server};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::Duration;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
+
+use once_cell::sync::Lazy;
 
 pub(crate) const CONTROL_MSG_SIZE: usize = 6;
 
@@ -139,4 +144,118 @@ pub enum NBError {
     NotConnected,
     #[error("The bucket is empty, no tokens available")]
     BucketEmpty,
+    #[error("Parse suffix error")]
+    ParseSuffixError(&'static str),
+}
+
+#[derive(Debug)]
+pub enum SizeFormat {
+    Kilo,
+    Mega,
+    Giga,
+    Tera,
+    Kibi,
+    Mibi,
+    Gibi,
+    Tebi,
+    Auto,
+}
+
+impl Default for SizeFormat {
+    fn default() -> Self {
+        SizeFormat::Auto
+    }
+}
+
+#[derive(Debug)]
+pub struct CommonConfig {
+    pub format: SizeFormat,
+    pub file: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct ClientConfig {
+    pub common: CommonConfig,
+    pub bw: Option<u64>,
+    pub addr: SocketAddr,
+}
+
+#[derive(Debug)]
+pub struct ServerConfig {
+    pub common: CommonConfig,
+    pub addr: SocketAddr,
+}
+
+static SIZE_MAP: Lazy<HashMap<char, u64>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    m.insert('k', 1024);
+    m.insert('m', 1024 * 1024);
+    m.insert('g', 1024 * 1024 * 1024);
+    m.insert('t', 1024 * 1024 * 1024 * 1024);
+
+    m.insert('K', 1000);
+    m.insert('M', 1000 * 1000);
+    m.insert('G', 1000 * 1000 * 1000);
+    m.insert('T', 1000 * 1000 * 1000 * 1000);
+
+    m
+});
+
+fn parse_u64_from_suffix(s: &str) -> Result<u64, NBError> {
+    if !s.is_ascii() {
+        return Err(NBError::ParseSuffixError("the input has to be ASCII"));
+    }
+    let mut output = 0;
+    let mut iter = s.chars().rev().peekable();
+
+    let modifier = match iter.peek() {
+        Some(c) if c.is_ascii_digit() => 1,
+        Some(_) => {
+            let c = iter.next().unwrap();
+            let modi = SIZE_MAP
+                .get(&c)
+                .ok_or(NBError::ParseSuffixError("invalid suffix"))?;
+
+            *modi
+        }
+        None => 1,
+    };
+
+    for (i, char) in iter.enumerate() {
+        let digit = char.to_digit(10).ok_or(NBError::ParseSuffixError(
+            "a char that is not a modifier is not a digit",
+        ))? as u64;
+        output += digit * (10_u64.pow(i.try_into().unwrap()));
+    }
+
+    output *= modifier;
+
+    Ok(output)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::parse_u64_from_suffix;
+
+    #[test]
+    fn test_parse_u64_from_suffix() {
+        let result = parse_u64_from_suffix("123").unwrap();
+        assert_eq!(result, 123);
+
+        let result = parse_u64_from_suffix("1k").unwrap();
+        assert_eq!(result, 1024);
+
+        let result = parse_u64_from_suffix("1K").unwrap();
+        assert_eq!(result, 1000);
+
+        let result = parse_u64_from_suffix("15t").unwrap();
+        assert_eq!(result, 16492674416640);
+
+        let result = parse_u64_from_suffix("1Z");
+        assert!(result.is_err());
+
+        let result = parse_u64_from_suffix("17a6k");
+        println!("{result:?}");
+        assert!(result.is_err());
+    }
 }

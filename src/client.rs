@@ -1,8 +1,6 @@
-use std::net::SocketAddr;
-
 use crate::{
-    tcp_test::TCPTest, test_manager, Direction, MessageID, NewTestMessage, Protocol, Role,
-    TestAssociationMessage,
+    tcp_test::TCPTest, test_manager, ClientConfig, Direction, MessageID, NewTestMessage, Protocol,
+    Role, TestAssociationMessage,
 };
 use anyhow::Result;
 use std::time::Duration as StdDuration;
@@ -10,23 +8,15 @@ use time::Duration;
 use tokio::net::TcpStream;
 
 #[derive(Debug)]
-pub struct ClientConfig {
-    pub addr: SocketAddr,
-}
-
-#[derive(Debug)]
 pub struct Client {
     stream: TcpStream,
-    server_addr: SocketAddr,
+    config: ClientConfig,
 }
 
 impl Client {
     pub async fn new(config: ClientConfig) -> Result<Self> {
         let stream = TcpStream::connect(&config.addr).await?;
-        Ok(Client {
-            stream,
-            server_addr: config.addr,
-        })
+        Ok(Client { stream, config })
     }
 
     pub async fn start_new_test(&mut self) -> Result<()> {
@@ -48,7 +38,7 @@ impl Client {
         )
         .await?;
         tokio::time::sleep(StdDuration::from_secs(1)).await;
-        let mut test_socket = TcpStream::connect(self.server_addr).await.unwrap();
+        let mut test_socket = TcpStream::connect(self.config.addr).await.unwrap();
         let msg = TestAssociationMessage { code };
         crate::send_message(msg, MessageID::TEST_ASSOCIATION_MESSAGE, &mut test_socket)
             .await

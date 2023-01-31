@@ -1,6 +1,8 @@
+use std::fmt;
+
 use anyhow::Error;
-use clap::{Parser, Subcommand};
-use netbench::{Client, ClientConfig, Server, ServerConfig};
+use clap::{Parser, Subcommand, ValueEnum};
+use netbench::{Client, ClientConfig, CommonConfig, Server, ServerConfig, SizeFormat};
 use tracing::Level;
 use tracing_subscriber::filter::EnvFilter;
 
@@ -14,8 +16,23 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
     /// Output in json
-    #[arg(long, short, default_value_t = false)]
+    #[arg(
+        long,
+        short,
+        default_value_t = false,
+        default_missing_value = "true",
+        num_args = 0
+    )]
     json: bool,
+    #[arg(
+        long,
+        value_name = "WHEN",
+        default_value_t = ColorWhen::Auto,
+        value_enum,
+        num_args = 0..=1,
+        default_missing_value = "always",
+    )]
+    color: ColorWhen,
 }
 
 #[derive(Debug, Subcommand)]
@@ -25,6 +42,9 @@ enum Commands {
         /// The port to listen on
         #[arg(long, short, default_value_t = DEFAULT_PORT)]
         port: u16,
+        /// Set the length of the send/rcv buffers
+        #[arg(long, short, default_value_t = String::from("128k"))]
+        length: String,
     },
     Server {
         host: String,
@@ -32,6 +52,19 @@ enum Commands {
         #[arg(long, short, default_value_t = DEFAULT_PORT)]
         port: u16,
     },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, PartialOrd)]
+enum ColorWhen {
+    Always,
+    Auto,
+    Never,
+}
+
+impl fmt::Display for ColorWhen {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.to_possible_value().unwrap().get_name().fmt(f)
+    }
 }
 
 #[tokio::main]
@@ -43,12 +76,20 @@ async fn main() -> Result<(), Error> {
         .init();
 
     let matches = Cli::parse();
+    let common_config = CommonConfig {
+        file: None,
+        format: SizeFormat::Auto,
+    };
+
     match matches.command {
-        Commands::Client { host, port } => {
+        Commands::Client { host, port, .. } => {
             let addr = format!("{}:{}", host, port);
             let config = ClientConfig {
                 addr: addr.parse().unwrap(),
+                common: common_config,
+                bw: None,
             };
+
             let mut c = Client::new(config).await.unwrap();
             c.start_new_test().await.unwrap();
         }
@@ -57,6 +98,7 @@ async fn main() -> Result<(), Error> {
             let addr = format!("{}:{}", host, port);
             let config = ServerConfig {
                 addr: addr.parse().unwrap(),
+                common: common_config,
             };
             let (mut server, _) = Server::new(config).await.unwrap();
             server.accept().await.unwrap();
