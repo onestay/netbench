@@ -76,7 +76,7 @@ impl ConnectedClient {
                     trace!("found associated TestMessage {test_message:?}");
 
                     match test_message.protocol {
-                        Protocol::TCP => {
+                        Protocol::TCP(_) => {
                             let test = TCPTest::new(test_message, Role::Server, self.socket);
                             test_manager::run(test).await;
                         }

@@ -1,6 +1,6 @@
 use crate::{
-    tcp_test::TCPTest, test_manager, ClientConfig, Direction, MessageID, NewTestMessage, Protocol,
-    Role, TestAssociationMessage,
+    tcp_test::TCPTest, test_manager, ClientConfig, Direction, EndCondition, MessageID,
+    NewTestMessage, Protocol, Role, TestAssociationMessage,
 };
 use anyhow::Result;
 use std::time::Duration as StdDuration;
@@ -24,9 +24,9 @@ impl Client {
         let new_test_message = NewTestMessage {
             bw: 0,
             direction: Direction::ClientToServer,
-            protocol: Protocol::TCP,
+            protocol: self.config.proto,
             code,
-            duration: Duration::new(10, 0),
+            end_condition: EndCondition::Time(Duration::new(10, 0)),
         };
 
         //let new_test_message_clone = new_test_message.clone();
@@ -43,8 +43,10 @@ impl Client {
         crate::send_message(msg, MessageID::TEST_ASSOCIATION_MESSAGE, &mut test_socket)
             .await
             .unwrap();
-
-        let test = TCPTest::new(new_test_message, Role::Client, test_socket);
+        let test = match self.config.proto {
+            Protocol::TCP(_) => TCPTest::new(new_test_message, Role::Client, test_socket),
+            _ => todo!("only TCP is implemented so far"),
+        };
         test_manager::run(test).await;
         Ok(())
     }

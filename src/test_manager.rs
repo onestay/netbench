@@ -1,4 +1,5 @@
-use crate::NewTestMessage;
+use crate::{EndCondition, NewTestMessage};
+use owo_colors::OwoColorize;
 
 use std::fmt;
 use time::{Duration, OffsetDateTime};
@@ -90,10 +91,11 @@ pub(crate) trait Test {
 
 fn print_header(test_info: &NewTestMessage) {
     println!(
-        "Running a {} test for {} seconds...",
-        test_info.protocol, test_info.duration
+        "Running a {} test for {:?}...",
+        test_info.protocol.green(),
+        test_info.end_condition.green()
     );
-    println!("Interval\t\tSent\t\tReceived")
+    println!("{}", "Interval\t\tSent\t\tReceived".bold())
 }
 
 pub(crate) async fn run<T: Test>(test: T) {
@@ -103,13 +105,18 @@ pub(crate) async fn run<T: Test>(test: T) {
     let (send, recv) = tokio::sync::mpsc::channel(5);
     let test_start = OffsetDateTime::now_utc();
     let mut current_interval = test_start;
-    let test_duration = test_info.duration;
+    let test_duration = match test_info.end_condition {
+        EndCondition::Time(duration) => duration,
+        _ => panic!("Only EndCondition::Time is currently implemented"),
+    };
     const INTERVAL: Duration = Duration::new(1, 0);
     let mut intervals = Vec::new();
     let handle = test.start_test(recv);
+
     while OffsetDateTime::now_utc() - test_start < test_duration {
         if OffsetDateTime::now_utc() - current_interval > INTERVAL {
             current_interval = OffsetDateTime::now_utc();
+
             match get_interval_stats(&send).await {
                 Ok(Some(res)) => {
                     info!("{res:?}");
@@ -121,7 +128,9 @@ pub(crate) async fn run<T: Test>(test: T) {
             }
         }
     }
+
     debug!("done");
+
     if !handle.is_finished() {
         send.send(TestControlMessage::Done).await.unwrap();
     }

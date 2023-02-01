@@ -8,14 +8,14 @@ mod tcp_test;
 mod test_manager;
 mod token_bucket;
 
+pub use crate::client::Client;
+pub use crate::server::{ControlMessage, Server};
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-
-pub use crate::client::Client;
-pub use crate::server::{ControlMessage, Server};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::Duration;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -64,20 +64,26 @@ pub enum Direction {
     Bidirectional,
 }
 
-#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Serialize, Deserialize, PartialEq, PartialOrd, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Protocol {
-    TCP,
+    TCP(TCPTestInfo),
     UDP,
     DCCP,
     SCTP,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, PartialOrd, Clone, Copy)]
+pub struct TCPTestInfo {
+    pub recv_buf_size: u64,
+    pub send_buf_size: u64,
+}
+
 impl fmt::Display for Protocol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Protocol::TCP => write!(f, "TCP"),
+            Protocol::TCP(_) => write!(f, "TCP"),
             Protocol::UDP => write!(f, "UDP"),
             Protocol::DCCP => write!(f, "DCCP"),
             Protocol::SCTP => write!(f, "SCTP"),
@@ -92,13 +98,19 @@ pub enum Role {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub enum EndCondition {
+    Time(Duration),
+    Bytes(u64),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTestMessage {
     direction: Direction,
     protocol: Protocol,
     bw: u64,
     code: [u8; 32],
-    duration: Duration,
+    end_condition: EndCondition,
 }
 
 impl NewTestMessage {}
@@ -178,6 +190,7 @@ pub struct ClientConfig {
     pub common: CommonConfig,
     pub bw: Option<u64>,
     pub addr: SocketAddr,
+    pub proto: Protocol,
 }
 
 #[derive(Debug)]
@@ -201,7 +214,7 @@ static SIZE_MAP: Lazy<HashMap<char, u64>> = Lazy::new(|| {
     m
 });
 
-fn parse_u64_from_suffix(s: &str) -> Result<u64, NBError> {
+pub fn parse_u64_from_suffix(s: &str) -> Result<u64, NBError> {
     if !s.is_ascii() {
         return Err(NBError::ParseSuffixError("the input has to be ASCII"));
     }
