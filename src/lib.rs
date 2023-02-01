@@ -10,7 +10,7 @@ mod token_bucket;
 
 pub use crate::client::Client;
 pub use crate::server::{ControlMessage, Server};
-use clap::ValueEnum;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
