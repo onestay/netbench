@@ -1,7 +1,7 @@
-use crate::{EndCondition, NewTestMessage};
-use owo_colors::OwoColorize;
+use crate::{should_recv, should_send, Direction, EndCondition, NewTestMessage, Role};
 
-use std::fmt;
+use std::{fmt, io};
+use termcolor::{Color, ColorChoice, ColorSpec, StandardStream};
 use time::{Duration, OffsetDateTime};
 use tokio::{
     sync::{
@@ -32,15 +32,48 @@ impl fmt::Display for IntervalResult {
     }
 }
 
+const SUFFIXES_SI: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+
 impl IntervalResult {
-    fn print_for_display(&self, test_start_time: &OffsetDateTime) {
-        println!(
-            "{:.2}-{:.2} sec\t\t{:.2} Mbit/s\t\t{:.2} Mbit/s",
+    fn print_for_display<P: io::Write + termcolor::WriteColor>(
+        &self,
+        test_start_time: &OffsetDateTime,
+        role: Role,
+        direction: Direction,
+        printer: &mut P,
+    ) -> io::Result<()> {
+        printer.reset()?;
+        // Write the time interval
+        write!(
+            printer,
+            "{:.2}-{:.2}",
             (self.start - *test_start_time).as_seconds_f64(),
             (self.end - *test_start_time).as_seconds_f64(),
-            self.mbit_s_sent,
-            self.mbit_s_received
-        )
+        )?;
+        // Write the time interval unit
+        printer.set_color(ColorSpec::new().set_bold(true))?;
+        write!(printer, " sec")?;
+        // Write the separator
+        printer.reset()?;
+        write!(printer, "{:^3}", "|")?;
+
+        if should_send(direction, role) {
+            write!(printer, "{:<4.2}", self.mbit_s_sent)?;
+            printer.set_color(ColorSpec::new().set_bold(true))?;
+            write!(printer, " Mbit/s")?;
+            printer.reset()?;
+        }
+
+        if should_recv(direction, role) {
+            write!(printer, "{:^3}", "|")?;
+            write!(printer, "{:<4.2}", self.mbit_s_received)?;
+            printer.set_color(ColorSpec::new().set_bold(true))?;
+            write!(printer, " Mbit/s")?;
+        }
+
+        writeln!(printer)?;
+        printer.flush()?;
+        Ok(())
     }
 }
 
@@ -90,16 +123,26 @@ pub(crate) trait Test {
 }
 
 fn print_header(test_info: &NewTestMessage) {
-    println!(
-        "Running a {} test for {:?}...",
-        test_info.protocol.green(),
-        test_info.end_condition.green()
-    );
-    println!("{}", "Interval\t\tSent\t\tReceived".bold())
+    match test_info.end_condition {
+        EndCondition::Bytes(bytes) => {
+            println!(
+                "Running a {} test for {} bytes...",
+                test_info.protocol, bytes
+            );
+        }
+        EndCondition::Time(duration) => {
+            println!(
+                "Running a {} test for {:.0} seconds...",
+                test_info.protocol,
+                duration.as_seconds_f64()
+            );
+        }
+    }
 }
 
-pub(crate) async fn run<T: Test>(test: T) {
+pub(crate) async fn run<T: Test>(test: T, role: Role) {
     let test_info = test.test_info();
+    let direction = test_info.direction;
     print_header(test_info);
 
     let (send, recv) = tokio::sync::mpsc::channel(5);
@@ -120,7 +163,10 @@ pub(crate) async fn run<T: Test>(test: T) {
             match get_interval_stats(&send).await {
                 Ok(Some(res)) => {
                     info!("{res:?}");
-                    res.print_for_display(&test_start);
+                    let stdout = StandardStream::stdout(ColorChoice::Always);
+                    let mut stdout = stdout.lock();
+                    res.print_for_display(&test_start, role, direction, &mut stdout)
+                        .unwrap();
                     intervals.push(res);
                 }
                 Ok(None) => warn!("didn't get interval results"),

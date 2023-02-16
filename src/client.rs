@@ -47,7 +47,7 @@ impl Client {
             Protocol::TCP(_) => TCPTest::new(new_test_message, Role::Client, test_socket),
             _ => todo!("only TCP is implemented so far"),
         };
-        test_manager::run(test).await;
+        test_manager::run(test, Role::Client).await;
         Ok(())
     }
 }

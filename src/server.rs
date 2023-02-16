@@ -78,7 +78,7 @@ impl ConnectedClient {
                     match test_message.protocol {
                         Protocol::TCP(_) => {
                             let test = TCPTest::new(test_message, Role::Server, self.socket);
-                            test_manager::run(test).await;
+                            test_manager::run(test, Role::Server).await;
                         }
                         _ => todo!(),
                     }
