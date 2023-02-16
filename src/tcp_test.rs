@@ -6,7 +6,7 @@ use tracing::{debug, error, trace};
 
 use crate::{
     test_manager::{IntervalResult, Test, TestControlMessage},
-    NewTestMessage, Role,
+    NewTestMessage, Protocol, Role, TCPTestInfo,
 };
 
 #[cfg(target_os = "linux")]
@@ -86,6 +86,7 @@ pub(crate) struct TcpInfo {
 fn get_tcp_info(sockfd: c_int) -> Option<TcpInfo> {
     let mut tcp_info = TcpInfo::default();
     let mut tcp_info_size = mem::size_of::<TcpInfo>() as libc::socklen_t;
+
     unsafe {
         let ret = libc::getsockopt(
             sockfd,
@@ -106,62 +107,93 @@ fn get_tcp_info(sockfd: c_int) -> Option<TcpInfo> {
 pub(crate) struct TCPTest {
     socket: TcpStream,
     test_info: NewTestMessage,
+    tcp_test_info: TCPTestInfo,
     role: Role,
+}
+
+impl TCPTest {
+    fn read(
+        &mut self,
+        n_read: &mut u32,
+        read_buf: &mut [u8],
+        interval: &mut IntervalResult,
+    ) -> bool {
+        *n_read += 1;
+        match self.socket.try_read(read_buf) {
+            Ok(n) => {
+                if n == 0 {
+                    trace!("read 0");
+                    return false;
+                }
+                interval.add_bytes_received(n);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                return true;
+            }
+            Err(e) => {
+                error!("{e}");
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn write(
+        &mut self,
+        n_send: &mut u32,
+        is_done: bool,
+        send_buf: &[u8],
+        interval: &mut IntervalResult,
+    ) -> bool {
+        *n_send += 1;
+        //trace!("select write");
+        if is_done {
+            trace!("done from send");
+            return false;
+        }
+        match self.socket.try_write(send_buf) {
+            Ok(n) => {
+                //trace!("sent bytes");
+                interval.add_bytes_sent(n);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                trace!("got would block on send");
+            }
+            Err(e) => {
+                error!("{e}");
+                return false;
+            }
+        }
+
+        true
+    }
 }
 
 impl Test for TCPTest {
     fn start_test(
-        self,
+        mut self,
         mut comm_channel: tokio::sync::mpsc::Receiver<crate::test_manager::TestControlMessage>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut interval = IntervalResult::default();
-            let mut read_buf = [0; 1024 * 128];
-            let send_buf = [0xAB; 1024 * 128];
+            let mut read_buf = vec![0; self.tcp_test_info.recv_buf_size.try_into().unwrap()];
+            let send_buf = vec![0xAB; self.tcp_test_info.send_buf_size.try_into().unwrap()];
             let mut is_done = false;
             let (mut n_send, mut n_read, mut n_chan) = (0, 0, 0);
+            let should_send = crate::should_send(self.test_info.direction, self.role);
+            let should_recv = crate::should_recv(self.test_info.direction, self.role);
+
             loop {
                 tokio::select! {
-                    _ = self.socket.readable(), if matches!(self.role, Role::Server) => {
-                        n_read += 1;
-                        match self.socket.try_read(&mut read_buf) {
-                            Ok(n) => {
-                                if n == 0 {
-                                    trace!("read 0");
-                                    break;
-                                }
-                                interval.add_bytes_received(n);
-                            },
-                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                continue;
-                            }
-                            Err(e) => {
-                                error!("{e}");
-                                break;
-                            }
-
-                        }
-                    }
-                    _ = self.socket.writable(), if matches!(self.role, Role::Client) => {
-                        n_send += 1;
-                        //trace!("select write");
-                        if is_done {
-                            trace!("done from send");
+                    _ = self.socket.readable(), if should_recv => {
+                        if !self.read(&mut n_read, read_buf.as_mut_slice(), &mut interval) {
                             break;
                         }
-                        match self.socket.try_write(&send_buf) {
-                            Ok(n) => {
-                                //trace!("sent bytes");
-                                interval.add_bytes_sent(n);
-                            },
-                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                trace!("got would block on send");
-                                continue;
-                            }
-                            Err(e) => {
-                                error!("{e}");
-                                break;
-                            }
+                    }
+                    _ = self.socket.writable(), if should_send => {
+                        if !self.write(&mut n_send, is_done, send_buf.as_slice(), &mut interval) {
+                            break;
                         }
                     }
 
@@ -205,10 +237,17 @@ impl Test for TCPTest {
 
 impl TCPTest {
     pub(crate) fn new(msg: NewTestMessage, role: Role, socket: TcpStream) -> Self {
+        let tcp_test_info = if let Protocol::TCP(tcp_test_info) = msg.protocol {
+            tcp_test_info
+        } else {
+            panic!()
+        };
+
         TCPTest {
             socket,
             test_info: msg,
             role,
+            tcp_test_info,
         }
     }
 }

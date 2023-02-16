@@ -3,7 +3,8 @@ use std::fmt;
 use anyhow::Error;
 use clap::{Parser, Subcommand, ValueEnum};
 use netbench::{
-    Client, ClientConfig, CommonConfig, Protocol, Server, ServerConfig, SizeFormat, TCPTestInfo,
+    parse_u64_with_suffix, Client, ClientConfig, CommonConfig, Protocol, Server, ServerConfig,
+    SizeFormat, TCPTestInfo,
 };
 use tracing::Level;
 use tracing_subscriber::filter::EnvFilter;
@@ -51,6 +52,9 @@ enum Commands {
         /// Direction to send
         #[arg(long, short, default_value_t = Direction::Uni)]
         direction: Direction,
+        /// target bitrate
+        #[arg(long, short, value_parser = parse_u64_with_suffix)]
+        bitrate: Option<u64>,
     },
     Server {
         #[arg(default_value_t = String::from("0.0.0.0"))]
@@ -66,13 +70,29 @@ enum Commands {
 enum ProtocolCommands {
     TCP {
         /// Set the length of the send/rcv buffers
-        #[arg(long, short, default_value_t = String::from("128k"))]
-        length: String,
+        #[arg(long, short, default_value_t = 1024 * 128, value_parser = parse_u64_with_suffix)]
+        length: u64,
+        /// Set the length of the receive buffer
+        #[arg(long, value_parser = parse_u64_with_suffix, conflicts_with = "length")]
+        recv_length: Option<u64>,
+        /// Set the length of the send buffer
+        #[arg(long, value_parser = parse_u64_with_suffix, conflicts_with = "length")]
+        send_length: Option<u64>,
     },
     UDP,
     DCCP,
     SCTP,
     QUIC,
+}
+
+impl From<Direction> for netbench::Direction {
+    fn from(value: Direction) -> Self {
+        match value {
+            Direction::Uni => netbench::Direction::ClientToServer,
+            Direction::Rev => netbench::Direction::ServerToClient,
+            Direction::Bi => netbench::Direction::Bidirectional,
+        }
+    }
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -120,16 +140,21 @@ async fn main() -> Result<(), Error> {
 
     match matches.command {
         Commands::Client {
-            host, port, proto, ..
+            host,
+            port,
+            proto,
+            direction,
+            ..
         } => {
             let proto = match proto {
-                ProtocolCommands::TCP { length } => {
-                    let length = netbench::parse_u64_from_suffix(&length).unwrap();
-                    Protocol::TCP(TCPTestInfo {
-                        recv_buf_size: length,
-                        send_buf_size: length,
-                    })
-                }
+                ProtocolCommands::TCP {
+                    length,
+                    send_length,
+                    recv_length,
+                } => Protocol::TCP(TCPTestInfo {
+                    recv_buf_size: recv_length.unwrap_or(length),
+                    send_buf_size: send_length.unwrap_or(length),
+                }),
                 _ => todo!("only TCP is implemented right now"),
             };
             let addr = format!("{}:{}", host, port);
@@ -138,6 +163,7 @@ async fn main() -> Result<(), Error> {
                 common: common_config,
                 bw: None,
                 proto,
+                direction: direction.into(),
             };
 
             let mut c = Client::new(config).await.unwrap();

@@ -22,7 +22,7 @@ impl Client {
     pub async fn start_new_test(&mut self) -> Result<()> {
         let code = rand::random();
         let new_test_message = NewTestMessage {
-            bw: 0,
+            bw: self.config.bw.unwrap_or(0),
             direction: Direction::ClientToServer,
             protocol: self.config.proto,
             code,

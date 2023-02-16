@@ -91,7 +91,7 @@ impl fmt::Display for Protocol {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 pub enum Role {
     Client,
     Server,
@@ -191,6 +191,7 @@ pub struct ClientConfig {
     pub bw: Option<u64>,
     pub addr: SocketAddr,
     pub proto: Protocol,
+    pub direction: Direction,
 }
 
 #[derive(Debug)]
@@ -214,7 +215,7 @@ static SIZE_MAP: Lazy<HashMap<char, u64>> = Lazy::new(|| {
     m
 });
 
-pub fn parse_u64_from_suffix(s: &str) -> Result<u64, NBError> {
+pub fn parse_u64_with_suffix(s: &str) -> Result<u64, NBError> {
     if !s.is_ascii() {
         return Err(NBError::ParseSuffixError("the input has to be ASCII"));
     }
@@ -246,29 +247,99 @@ pub fn parse_u64_from_suffix(s: &str) -> Result<u64, NBError> {
     Ok(output)
 }
 
+pub(crate) fn should_send(direction: Direction, role: Role) -> bool {
+    match direction {
+        Direction::ClientToServer if role == Role::Client => true,
+        Direction::ServerToClient if role == Role::Server => true,
+        Direction::Bidirectional => true,
+        _ => false,
+    }
+}
+
+pub(crate) fn should_recv(direction: Direction, role: Role) -> bool {
+    match direction {
+        Direction::Bidirectional => true,
+        _ => !should_send(direction, role),
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use crate::parse_u64_from_suffix;
-
+    use super::*;
+    use crate::parse_u64_with_suffix;
     #[test]
     fn test_parse_u64_from_suffix() {
-        let result = parse_u64_from_suffix("123").unwrap();
+        let result = parse_u64_with_suffix("123").unwrap();
         assert_eq!(result, 123);
 
-        let result = parse_u64_from_suffix("1k").unwrap();
+        let result = parse_u64_with_suffix("1k").unwrap();
         assert_eq!(result, 1024);
 
-        let result = parse_u64_from_suffix("1K").unwrap();
+        let result = parse_u64_with_suffix("1K").unwrap();
         assert_eq!(result, 1000);
 
-        let result = parse_u64_from_suffix("15t").unwrap();
+        let result = parse_u64_with_suffix("15t").unwrap();
         assert_eq!(result, 16492674416640);
 
-        let result = parse_u64_from_suffix("1Z");
+        let result = parse_u64_with_suffix("1Z");
         assert!(result.is_err());
 
-        let result = parse_u64_from_suffix("17a6k");
+        let result = parse_u64_with_suffix("17a6k");
         println!("{result:?}");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_should_send() {
+        let role = Role::Client;
+        let direction = Direction::ClientToServer;
+        assert!(should_send(direction, role));
+
+        let role = Role::Server;
+        let direction = Direction::ClientToServer;
+        assert!(!should_send(direction, role));
+
+        let role = Role::Client;
+        let direction = Direction::ServerToClient;
+        assert!(!should_send(direction, role));
+
+        let role = Role::Server;
+        let direction = Direction::ServerToClient;
+        assert!(should_send(direction, role));
+
+        let role = Role::Client;
+        let direction = Direction::Bidirectional;
+        assert!(should_send(direction, role));
+
+        let role = Role::Server;
+        let direction = Direction::Bidirectional;
+        assert!(should_send(direction, role));
+    }
+
+    #[test]
+    fn test_should_recv() {
+        let role = Role::Client;
+        let direction = Direction::ClientToServer;
+        assert!(!should_recv(direction, role));
+
+        let role = Role::Server;
+        let direction = Direction::ClientToServer;
+        assert!(should_recv(direction, role));
+
+        let role = Role::Client;
+        let direction = Direction::ServerToClient;
+        assert!(should_recv(direction, role));
+
+        let role = Role::Server;
+        let direction = Direction::ServerToClient;
+        assert!(!should_recv(direction, role));
+
+        let role = Role::Client;
+        let direction = Direction::Bidirectional;
+        assert!(should_recv(direction, role));
+
+        let role = Role::Server;
+        let direction = Direction::Bidirectional;
+        assert!(should_recv(direction, role));
     }
 }
