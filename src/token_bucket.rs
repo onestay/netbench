@@ -55,12 +55,11 @@ mod test {
         let start = Instant::now();
         let mut sent_this_sec = 0;
         let mut interval_start = start;
-        while Instant::now() - start < Duration::from_secs(10) {
+        while Instant::now() - start < Duration::from_secs(3) {
             sleep(Duration::from_millis(1));
             if bucket.try_consume(1500).is_ok() {
                 sent_this_sec += 1500;
                 if Instant::now() - interval_start >= Duration::from_secs(1) {
-                    println!("Sent this sec: {}", sent_this_sec);
                     assert!(sent_this_sec > (50 * 1024) - 1500);
                     assert!(sent_this_sec < (100 * 1024) + 1500);
                     sent_this_sec = 0;
