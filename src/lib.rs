@@ -186,6 +186,7 @@ impl Default for BasePreference {
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
+#[allow(non_camel_case_types)]
 pub enum Unit {
     B,
     KB,

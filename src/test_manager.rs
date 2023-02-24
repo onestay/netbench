@@ -2,8 +2,8 @@ use crate::{
     should_recv, should_send, Direction, EndCondition, NBytes, NBytesDisplay, NewTestMessage, Role,
 };
 
-use std::{fmt, io};
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream};
+use std::io;
+use termcolor::{ColorChoice, ColorSpec, StandardStream};
 use time::{Duration, OffsetDateTime};
 use tokio::{
     sync::{
