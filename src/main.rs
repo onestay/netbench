@@ -3,8 +3,8 @@ use std::fmt;
 use anyhow::Error;
 use clap::{Parser, Subcommand, ValueEnum};
 use netbench::{
-    parse_u64_with_suffix, Client, ClientConfig, CommonConfig, Protocol, Server, ServerConfig,
-    SizeFormat, TCPTestInfo,
+    parse_u64_with_suffix, BasePreference, Client, ClientConfig, CommonConfig, Protocol, Server,
+    ServerConfig, SizePreference, TCPTestInfo,
 };
 use tracing::Level;
 use tracing_subscriber::filter::EnvFilter;
@@ -135,7 +135,8 @@ async fn main() -> Result<(), Error> {
     let matches = Cli::parse();
     let common_config = CommonConfig {
         file: None,
-        format: SizeFormat::Auto,
+        format: SizePreference::Auto,
+        base: BasePreference::Base2,
     };
 
     match matches.command {

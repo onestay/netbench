@@ -1,4 +1,6 @@
-use crate::{should_recv, should_send, Direction, EndCondition, NewTestMessage, Role};
+use crate::{
+    should_recv, should_send, Direction, EndCondition, NBytes, NBytesDisplay, NewTestMessage, Role,
+};
 
 use std::{fmt, io};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream};
@@ -14,21 +16,27 @@ use tracing::{debug, error, info, warn};
 
 #[derive(Debug)]
 pub struct IntervalResult {
-    bytes_received: u64,
-    bytes_sent: u64,
-    mbit_s_sent: f64,
-    mbit_s_received: f64,
+    bytes_received: NBytes,
+    bytes_sent: NBytes,
     start: OffsetDateTime,
     end: OffsetDateTime,
 }
 
-impl fmt::Display for IntervalResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(
-            f,
-            "sent: {:.2} Mbit/s\treceived: {:.2} Mbit/s",
-            self.mbit_s_sent, self.mbit_s_received
-        )
+impl IntervalResult {
+    fn format_bytes_received(&self) -> NBytesDisplay {
+        self.bytes_received.format_as_bytes()
+    }
+
+    fn format_bytes_send(&self) -> NBytesDisplay {
+        self.bytes_sent.format_as_bytes()
+    }
+
+    fn format_bits_per_second_received(&self) -> NBytesDisplay {
+        self.bytes_received.format_as_bits()
+    }
+
+    fn format_bits_per_second_send(&self) -> NBytesDisplay {
+        self.bytes_sent.format_as_bits()
     }
 }
 
@@ -50,6 +58,7 @@ impl IntervalResult {
             (self.start - *test_start_time).as_seconds_f64(),
             (self.end - *test_start_time).as_seconds_f64(),
         )?;
+        let mut print_seperator = false;
         // Write the time interval unit
         printer.set_color(ColorSpec::new().set_bold(true))?;
         write!(printer, " sec")?;
@@ -58,17 +67,23 @@ impl IntervalResult {
         write!(printer, "{:^3}", "|")?;
 
         if should_send(direction, role) {
-            write!(printer, "{:<4.2}", self.mbit_s_sent)?;
+            let bits_sent = self.format_bits_per_second_send();
+            write!(printer, "{:<4.2}", bits_sent.n)?;
             printer.set_color(ColorSpec::new().set_bold(true))?;
-            write!(printer, " Mbit/s")?;
+            write!(printer, " {}/s", bits_sent.unit)?;
             printer.reset()?;
+            print_seperator = true;
+        }
+
+        if print_seperator {
+            write!(printer, "{:^3}", "|")?;
         }
 
         if should_recv(direction, role) {
-            write!(printer, "{:^3}", "|")?;
-            write!(printer, "{:<4.2}", self.mbit_s_received)?;
+            let bits_recv = self.format_bits_per_second_received();
+            write!(printer, "{:<4.2}", bits_recv.n)?;
             printer.set_color(ColorSpec::new().set_bold(true))?;
-            write!(printer, " Mbit/s")?;
+            write!(printer, " {}/s", bits_recv.unit)?;
         }
 
         writeln!(printer)?;
@@ -80,10 +95,8 @@ impl IntervalResult {
 impl Default for IntervalResult {
     fn default() -> Self {
         Self {
-            bytes_received: 0,
-            bytes_sent: 0,
-            mbit_s_received: 0.0,
-            mbit_s_sent: 0.0,
+            bytes_received: NBytes::default(),
+            bytes_sent: NBytes::default(),
             start: OffsetDateTime::now_utc(),
             end: OffsetDateTime::now_utc() + Duration::new(1, 0),
         }
@@ -102,8 +115,6 @@ impl IntervalResult {
     }
 
     pub(crate) fn prepare_to_send(&mut self) {
-        self.mbit_s_received = (self.bytes_received * 8) as f64 * 1e-6;
-        self.mbit_s_sent = (self.bytes_sent * 8) as f64 * 1e-6;
         self.end = OffsetDateTime::now_utc();
     }
 }

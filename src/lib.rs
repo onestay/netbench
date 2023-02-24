@@ -13,9 +13,9 @@ pub use crate::server::{ControlMessage, Server};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::{fmt, ops};
 use thiserror::Error;
 use time::Duration;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -146,6 +146,219 @@ where
     Ok(())
 }
 
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
+pub enum Base {
+    Base2,
+    Base10,
+}
+
+impl Default for Base {
+    fn default() -> Self {
+        Base::Base2
+    }
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
+pub enum SizePreference {
+    Auto,
+    K,
+    M,
+    G,
+    T,
+}
+
+impl Default for SizePreference {
+    fn default() -> Self {
+        SizePreference::Auto
+    }
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
+pub enum BasePreference {
+    Base2,
+    Base10,
+}
+
+impl Default for BasePreference {
+    fn default() -> Self {
+        BasePreference::Base2
+    }
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
+pub enum Unit {
+    B,
+    KB,
+    MB,
+    GB,
+    TB,
+    KiB,
+    MiB,
+    GiB,
+    TiB,
+    b,
+    Kb,
+    Mb,
+    Gb,
+    Tb,
+    Kib,
+    Mib,
+    Gib,
+    Tib,
+}
+
+impl Unit {
+    pub const fn value(&self) -> u64 {
+        match self {
+            Unit::B | Unit::b => 1,
+            Unit::KB | Unit::Kb => 1000,
+            Unit::MB | Unit::Mb => 1000 * 1000,
+            Unit::GB | Unit::Gb => 1000 * 1000 * 1000,
+            Unit::TB | Unit::Tb => 1000 * 1000 * 1000 * 1000,
+            Unit::KiB | Unit::Kib => 1024,
+            Unit::MiB | Unit::Mib => 1024 * 1024,
+            Unit::GiB | Unit::Gib => 1024 * 1024 * 1024,
+            Unit::TiB | Unit::Tib => 1024 * 1024 * 1024 * 1024,
+        }
+    }
+
+    pub const fn by_index_byte(base_preference: BasePreference, index: usize) -> Option<Self> {
+        match index {
+            0 if matches!(base_preference, BasePreference::Base2) => Some(Unit::B),
+            0 if matches!(base_preference, BasePreference::Base10) => Some(Unit::B),
+            1 if matches!(base_preference, BasePreference::Base2) => Some(Unit::KiB),
+            1 if matches!(base_preference, BasePreference::Base10) => Some(Unit::KB),
+            2 if matches!(base_preference, BasePreference::Base2) => Some(Unit::MiB),
+            2 if matches!(base_preference, BasePreference::Base10) => Some(Unit::MB),
+            3 if matches!(base_preference, BasePreference::Base2) => Some(Unit::GiB),
+            3 if matches!(base_preference, BasePreference::Base10) => Some(Unit::GB),
+            _ if matches!(base_preference, BasePreference::Base2) => Some(Unit::TiB),
+            _ if matches!(base_preference, BasePreference::Base10) => Some(Unit::TB),
+            _ => None,
+        }
+    }
+
+    pub const fn by_index_bit(base_preference: BasePreference, index: usize) -> Option<Self> {
+        match index {
+            0 if matches!(base_preference, BasePreference::Base2) => Some(Unit::b),
+            0 if matches!(base_preference, BasePreference::Base10) => Some(Unit::b),
+            1 if matches!(base_preference, BasePreference::Base2) => Some(Unit::Kib),
+            1 if matches!(base_preference, BasePreference::Base10) => Some(Unit::Kb),
+            2 if matches!(base_preference, BasePreference::Base2) => Some(Unit::Mib),
+            2 if matches!(base_preference, BasePreference::Base10) => Some(Unit::Mb),
+            3 if matches!(base_preference, BasePreference::Base2) => Some(Unit::Gib),
+            3 if matches!(base_preference, BasePreference::Base10) => Some(Unit::Gb),
+            _ if matches!(base_preference, BasePreference::Base2) => Some(Unit::Tib),
+            _ if matches!(base_preference, BasePreference::Base10) => Some(Unit::Tb),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Unit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let out = match self {
+            Unit::B => "B",
+            Unit::KB => "KB",
+            Unit::MB => "MB",
+            Unit::GB => "GB",
+            Unit::TB => "TB",
+            Unit::KiB => "KiB",
+            Unit::MiB => "MiB",
+            Unit::GiB => "GiB",
+            Unit::TiB => "TiB",
+            Unit::b => "b",
+            Unit::Kb => "Kb",
+            Unit::Mb => "Mb",
+            Unit::Gb => "Gb",
+            Unit::Tb => "Tb",
+            Unit::Kib => "Kib",
+            Unit::Mib => "Mib",
+            Unit::Gib => "Gib",
+            Unit::Tib => "Tib",
+        };
+
+        write!(f, "{out}")
+    }
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy, Default)]
+pub(crate) struct NBytes {
+    n: u64,
+    size_preference: SizePreference,
+    base_preference: BasePreference,
+}
+
+pub(crate) struct NBytesDisplay {
+    n: f64,
+    unit: Unit,
+}
+
+impl fmt::Display for NBytesDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.3} {}", self.n, self.unit)
+    }
+}
+
+impl NBytes {
+    fn format_as_bytes(&self) -> NBytesDisplay {
+        NBytes::format(self.n as f64, self.base_preference, self.size_preference)
+    }
+
+    fn format_as_bits(&self) -> NBytesDisplay {
+        let n = self.n.checked_mul(8).unwrap() as f64;
+        NBytes::format(n, self.base_preference, self.size_preference)
+    }
+
+    fn format(
+        n: f64,
+        base_preference: BasePreference,
+        size_preference: SizePreference,
+    ) -> NBytesDisplay {
+        let bytes = n.abs();
+        if !bytes.is_normal() {
+            return NBytesDisplay {
+                unit: Unit::B,
+                n: 0.0,
+            };
+        }
+        //println!("bytes {bytes}");
+        let place = match size_preference {
+            SizePreference::Auto => bytes.log(1024.0).floor() as i32,
+            SizePreference::K => 1,
+            SizePreference::M => 2,
+            SizePreference::G => 3,
+            SizePreference::T => 4,
+        };
+        //println!("place {place}");
+        let n = match base_preference {
+            BasePreference::Base2 => bytes / 1024_f64.powi(place),
+            BasePreference::Base10 => bytes / 1000_f64.powi(place),
+        };
+        //println!("n {n}");
+        let unit = Unit::by_index_byte(base_preference, place.try_into().unwrap()).unwrap();
+        //println!("unit {unit:?}");
+        NBytesDisplay { n, unit }
+    }
+}
+
+impl ops::Add<u64> for NBytes {
+    type Output = Self;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        NBytes {
+            n: self.n + rhs,
+            ..self
+        }
+    }
+}
+
+impl ops::AddAssign<u64> for NBytes {
+    fn add_assign(&mut self, rhs: u64) {
+        self.n += rhs;
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum NBError {
     #[error("The connection has been closed")]
@@ -161,27 +374,9 @@ pub enum NBError {
 }
 
 #[derive(Debug)]
-pub enum SizeFormat {
-    Kilo,
-    Mega,
-    Giga,
-    Tera,
-    Kibi,
-    Mibi,
-    Gibi,
-    Tebi,
-    Auto,
-}
-
-impl Default for SizeFormat {
-    fn default() -> Self {
-        SizeFormat::Auto
-    }
-}
-
-#[derive(Debug)]
 pub struct CommonConfig {
-    pub format: SizeFormat,
+    pub format: SizePreference,
+    pub base: BasePreference,
     pub file: Option<PathBuf>,
 }
 
@@ -341,5 +536,32 @@ mod test {
         let role = Role::Server;
         let direction = Direction::Bidirectional;
         assert!(should_recv(direction, role));
+    }
+
+    #[test]
+    fn test_n_bytes_display() {
+        let nbytes = NBytes {
+            n: 1024,
+            size_preference: SizePreference::K,
+            base_preference: BasePreference::Base2,
+        };
+
+        assert_eq!(nbytes.format_as_bytes().to_string(), "1.000 KiB");
+
+        let nbytes = NBytes {
+            n: 23570212479560,
+            size_preference: SizePreference::G,
+            base_preference: BasePreference::Base10,
+        };
+
+        assert_eq!(nbytes.format_as_bytes().to_string(), "23570.212 GB");
+
+        let nbytes = NBytes {
+            n: 6346712,
+            size_preference: SizePreference::M,
+            base_preference: BasePreference::Base2,
+        };
+
+        assert_eq!(nbytes.format_as_bits().to_string(), "48.422 Mib");
     }
 }
