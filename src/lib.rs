@@ -283,6 +283,15 @@ impl fmt::Display for Unit {
     }
 }
 
+fn u64_to_f64_checked(n: u64) -> Result<f64, NBError> {
+    let res = n as f64;
+    if res as u64 != n {
+        return Err(NBError::ConversionError(n, "f64"));
+    }
+
+    Ok(res)
+}
+
 #[derive(Debug, PartialEq, PartialOrd, Clone, Copy, Default)]
 pub(crate) struct NBytes {
     n: u64,
@@ -303,18 +312,20 @@ impl fmt::Display for NBytesDisplay {
 
 impl NBytes {
     fn format_as_bytes(&self) -> NBytesDisplay {
-        NBytes::format(self.n as f64, self.base_preference, self.size_preference)
+        let n = u64_to_f64_checked(self.n).unwrap();
+        NBytes::format(n, self.base_preference, self.size_preference, false)
     }
 
     fn format_as_bits(&self) -> NBytesDisplay {
-        let n = self.n.checked_mul(8).unwrap() as f64;
-        NBytes::format(n, self.base_preference, self.size_preference)
+        let n = u64_to_f64_checked(self.n.checked_mul(8).unwrap()).unwrap();
+        NBytes::format(n, self.base_preference, self.size_preference, true)
     }
 
     fn format(
         n: f64,
         base_preference: BasePreference,
         size_preference: SizePreference,
+        as_bits: bool,
     ) -> NBytesDisplay {
         let bytes = n.abs();
         if !bytes.is_normal() {
@@ -323,7 +334,7 @@ impl NBytes {
                 n: 0.0,
             };
         }
-        //println!("bytes {bytes}");
+
         let place = match size_preference {
             SizePreference::Auto => bytes.log(1024.0).floor() as i32,
             SizePreference::K => 1,
@@ -331,14 +342,17 @@ impl NBytes {
             SizePreference::G => 3,
             SizePreference::T => 4,
         };
-        //println!("place {place}");
+
         let n = match base_preference {
             BasePreference::Base2 => bytes / 1024_f64.powi(place),
             BasePreference::Base10 => bytes / 1000_f64.powi(place),
         };
-        //println!("n {n}");
-        let unit = Unit::by_index_byte(base_preference, place.try_into().unwrap()).unwrap();
-        //println!("unit {unit:?}");
+        let unit = if as_bits {
+            Unit::by_index_bit(base_preference, place.try_into().unwrap()).unwrap()
+        } else {
+            Unit::by_index_byte(base_preference, place.try_into().unwrap()).unwrap()
+        };
+
         NBytesDisplay { n, unit }
     }
 }
@@ -372,6 +386,8 @@ pub enum NBError {
     BucketEmpty,
     #[error("Parse suffix error")]
     ParseSuffixError(&'static str),
+    #[error("Conversion error: failed to parse {0} as a {1}")]
+    ConversionError(u64, &'static str),
 }
 
 #[derive(Debug)]
